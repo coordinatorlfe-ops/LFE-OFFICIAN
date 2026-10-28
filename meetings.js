@@ -9,7 +9,32 @@ const OFFICERS = {
   "LFE Program Officer": "Ms. Tania Islam",
   "LFE Jr. Program Officer": "Ariful Islam",
 };
-const CAT_NAME = { A: "Student / Guardian", B: "Student (other)", C: "Other" };
+const CAT_NAME = { A: "Student / Guardian", B: "Student (other)", C: "Other", D: "Monitor / SoD" };
+const CATS = ["A", "B", "C", "D"];
+const issueText = (r) => (r.issues || []).map((i) => (i === "ID card swapped" && r.swapId ? `ID card swapped (${r.s_id} with ${r.swapId})` : i)).join("; ");
+
+/* ---- IUB schools & majors (from data/iub-programs.json) ---- */
+function setSelect(el, v) {
+  if (!el || v === undefined) return;
+  if (el.tagName === "SELECT" && v && ![...el.options].some((o) => o.value === v)) el.add(new Option(v, v));
+  el.value = v;
+}
+async function loadPrograms() {
+  let data;
+  try { data = await (await fetch("data/iub-programs.json", { cache: "no-store" })).json(); }
+  catch { data = { schools: [] }; }
+  const maj = document.querySelector('[name="s_major"]'), sch = document.querySelector('[name="s_school"]');
+  const majorToSchool = {};
+  for (const sc of data.schools) {
+    const label = `${sc.code} — ${sc.name}`;
+    sch.add(new Option(label, label));
+    const g = document.createElement("optgroup"); g.label = label;
+    for (const m of sc.majors) { g.appendChild(new Option(m, m)); majorToSchool[m] = label; }
+    maj.appendChild(g);
+  }
+  maj.add(new Option("Other", "Other")); sch.add(new Option("Other", "Other"));
+  maj.addEventListener("change", () => { if (majorToSchool[maj.value]) sch.value = majorToSchool[maj.value]; });
+}
 
 /* ================= storage (IndexedDB) ================= */
 const DB = {
@@ -68,7 +93,7 @@ function narrative(r) {
   if (r.category === "C") {
     p.push(`${when}, ${officer} held a meeting: “${r.c_title}”${r.c_participants ? ", with " + r.c_participants : ""}.`);
   } else {
-    const bits = [r.s_major && `Major: ${r.s_major}`, r.category === "A" && r.s_school && `School: ${r.s_school.split(" — ")[0]}`].filter(Boolean).join(", ");
+    const bits = [r.s_major && `Major: ${r.s_major}`, ["A", "D"].includes(r.category) && r.s_school && `School: ${r.s_school.split(" — ")[0]}`].filter(Boolean).join(", ");
     let s = `${when}, ${officer} met student ${r.s_name} (ID ${r.s_id}${bits ? "; " + bits : ""})`;
     if (r.category === "A" && r.withGuardian === "yes")
       s += ` together with the guardian, ${r.g_name}${r.g_relation ? " (" + r.g_relation + ")" : ""}`;
@@ -76,6 +101,7 @@ function narrative(r) {
     s += ".";
     p.push(s);
     if (r.category === "A") p.push(`This was a ${r.meetingNo.toLowerCase()}${r.priorCount ? `; ${r.priorCount} earlier meeting(s) with this student are on record` : ""}.`);
+    if (r.category === "D") p.push(`Monitor / SoD form: ${(r.formStatus || "status not recorded").toLowerCase()}.${r.issues?.length ? " Issues noted: " + issueText(r) + "." : " No issues noted."}`);
     if (r.category === "B" && r.reasons?.length) p.push(`The meeting concerned: ${list(r.reasons, r.reasonOther)}.`);
   }
   if (r.outcomes?.length) p.push(`Outcome: ${outcomeText(r)}.`);
@@ -99,13 +125,14 @@ function sections(r) {
   ]]);
   if (r.category !== "C") S.push(["Student", [
     ["Name", r.s_name], ["ID", r.s_id], ["Major", r.s_major],
-    r.category === "A" && ["School", r.s_school],
+    ["A", "D"].includes(r.category) && ["School", r.s_school],
     ["Phone", r.s_phone],
     r.category === "A" && ["Advisor", r.s_advisor],
   ]]);
   if (r.category === "A") S.push(["Guardian", r.withGuardian === "yes"
     ? [["Name", r.g_name], ["Relation", r.g_relation], ["Phone", r.g_phone]]
     : [["Present", "No — met without guardian"]]]);
+  if (r.category === "D") S.push(["Monitor / SoD", [["Form status", r.formStatus || "—"], ["Issues", issueText(r) || "None"]]]);
   if (r.category === "B") S.push(["Cause / reason", [["Reason(s)", list(r.reasons, r.reasonOther) || "—"]]]);
   S.push(["Comments from LFE official", [["", r.comments || "—"]]]);
   S.push(["Follow-up & referral", [
@@ -209,7 +236,8 @@ async function exportExcel() {
     "Student phone": r.s_phone || "", "Advisor": r.s_advisor || "",
     "With guardian": r.category === "A" ? (r.withGuardian === "yes" ? "Yes" : "No") : "",
     "Guardian name": r.g_name || "", "Guardian relation": r.g_relation || "", "Guardian phone": r.g_phone || "",
-    "Reason(s)": list(r.reasons, r.reasonOther), "Comments": r.comments || "",
+    "Reason(s)": list(r.reasons, r.reasonOther),
+    "Form status (D)": r.formStatus || "", "Issues (D)": issueText(r), "Swapped with ID": r.swapId || "", "Comments": r.comments || "",
     "Follow-up date": r.followDate || "", "Follow-up suggestions": r.followSuggestions || "",
     "Referred to": list(r.referrals, r.referralOther), "Referral note": r.referralNote || "",
     "Audio recorded": r.hasAudio ? "Yes" : "No",
@@ -226,7 +254,7 @@ async function exportExcel() {
   ws["!autofilter"] = { ref: ws["!ref"] };
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "All meetings");
-  for (const c of ["A", "B", "C"]) {
+  for (const c of CATS) {
     const sub = rows.filter((r) => r.Category.startsWith(c));
     if (sub.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sub), `Category ${c}`);
   }
@@ -252,7 +280,7 @@ async function renderList() {
   const due = all.filter((r) => r.followDate && r.followDate >= today).length;
   $("#stats").innerHTML = `
     <div class="stat"><b>${all.length}</b>meetings</div>
-    ${["A", "B", "C"].map((c) => `<div class="stat"><b>${all.filter((r) => r.category === c).length}</b>${c} · ${CAT_NAME[c]}</div>`).join("")}
+    ${CATS.map((c) => `<div class="stat"><b>${all.filter((r) => r.category === c).length}</b>${c} · ${CAT_NAME[c]}</div>`).join("")}
     <div class="stat"><b>${due}</b>follow-ups upcoming</div>
     <div class="stat"><b>${all.filter((r) => r.referrals?.length).length}</b>referred</div>`;
   if (!recs.length) {
@@ -268,6 +296,8 @@ async function renderList() {
       <td class="hide-sm">${esc(OFFICERS[r.conductedBy])}</td>
       <td class="hide-sm">${(r.reasons || []).map((x) => `<span class="pill">${esc(x === "Other" && r.reasonOther ? r.reasonOther : x)}</span>`).join("")}
         ${(r.referrals || []).map((x) => `<span class="pill ref">→ ${esc(x === "Other" && r.referralOther ? r.referralOther : x)}</span>`).join("")}
+        ${r.formStatus ? `<span class="pill">${esc(r.formStatus)}</span>` : ""}
+        ${(r.issues || []).map((x) => `<span class="pill iss">${esc(x)}</span>`).join("")}
         ${(r.outcomes || []).map((o) => `<span class="pill out">${esc(o === "Medical issues" ? "Medical" : o.replace(" issues", "").replace(" needed", ""))}</span>`).join("")}
         ${r.hasAudio ? '<span class="pill">🎙 audio</span>' : ""}</td>
       <td>${r.followDate ? esc(fmtDate(r.followDate)) : "—"}</td></tr>`).join("")}
@@ -341,6 +371,8 @@ function validate(n) {
   if (n === 1) {
     $$("[data-req]", form).forEach((el) => { if (el.dataset.req.split(" ").includes(cat()) && !el.value.trim()) bad.push(el); });
     if (cat() === "A" && form.withGuardian.value === "yes" && !form.g_name.value.trim()) bad.push(form.g_name);
+    if (cat() === "D" && !form.formStatus.value) bad.push($("#form-status"));
+    if (cat() === "D" && $("#swap-cb").checked && !form.swapId.value.trim()) bad.push(form.swapId);
     if (cat() === "B" && !$$('[name="reasons"]:checked', form).length) bad.push($(".checks", $('[data-show="B"]')));
   }
   if (n === 3 && $("#med-cb").checked) {
@@ -357,14 +389,18 @@ function validate(n) {
 
 function collect() {
   const fd = new FormData(form), r = {};
-  for (const [k, v] of fd.entries()) if (!["reasons", "referrals", "outcomes"].includes(k)) r[k] = typeof v === "string" ? v.trim() : v;
+  for (const [k, v] of fd.entries()) if (!["reasons", "referrals", "outcomes", "issues"].includes(k)) r[k] = typeof v === "string" ? v.trim() : v;
   r.reasons = fd.getAll("reasons"); r.referrals = fd.getAll("referrals"); r.outcomes = fd.getAll("outcomes");
   if (!r.outcomes.includes("Medical issues")) { delete r.medicalType; delete r.medicalOther; }
   else if (r.medicalType !== "Other") delete r.medicalOther;
   const c = r.category;
   // drop fields that don't belong to the chosen category
   if (c === "C") ["s_name", "s_id", "s_major", "s_school", "s_phone", "s_advisor"].forEach((k) => delete r[k]);
-  if (c !== "A") { ["s_school", "s_advisor", "meetingNo", "withGuardian", "g_name", "g_relation", "g_phone"].forEach((k) => delete r[k]); }
+  r.issues = fd.getAll("issues");
+  if (c !== "D") { r.issues = []; delete r.formStatus; delete r.swapId; }
+  else { delete r.s_phone; if (!r.issues.includes("ID card swapped")) delete r.swapId; }
+  if (!["A", "D"].includes(c)) delete r.s_school;
+  if (c !== "A") { ["s_advisor", "meetingNo", "withGuardian", "g_name", "g_relation", "g_phone"].forEach((k) => delete r[k]); }
   if (c === "A" && r.withGuardian !== "yes") ["g_name", "g_relation", "g_phone"].forEach((k) => delete r[k]);
   if (c !== "B") { r.reasons = []; delete r.reasonOther; }
   if (c !== "C") { delete r.c_title; delete r.c_participants; }
@@ -379,6 +415,8 @@ $("#next").addEventListener("click", () => { if (validate(step)) setStep(step + 
 $("#back").addEventListener("click", () => setStep(Math.max(0, step - 1)));
 $$('[name="category"]', form).forEach((el) => el.addEventListener("change", applyCategory));
 $$('[name="withGuardian"]', form).forEach((el) => el.addEventListener("change", applyCategory));
+$("#swap-cb").addEventListener("change", (e) => { $("#swap-block").hidden = !e.target.checked; $("#swap-own").value = form.s_id.value; });
+form.s_id.addEventListener("input", () => ($("#swap-own").value = form.s_id.value));
 $("#reason-other-cb").addEventListener("change", (e) => ($("#reason-other").hidden = !e.target.checked));
 $("#med-cb").addEventListener("change", (e) => ($("#med-block").hidden = !e.target.checked));
 $$('[name="medicalType"]', form).forEach((el) => el.addEventListener("change", () => ($("#med-other").hidden = form.medicalType.value !== "Other")));
@@ -396,7 +434,7 @@ form.s_id.addEventListener("change", async () => {
   hint.textContent = `${prev.length} earlier meeting(s) with this student on record — last on ${fmtDate(last.date)} (Category ${last.category}).`;
   if (cat() === "A") form.meetingNo.value = "Follow-up meeting";
   if (!form.s_name.value) {
-    for (const k of ["s_name", "s_major", "s_school", "s_phone", "s_advisor"]) if (last[k] && form[k]) form[k].value = last[k];
+    for (const k of ["s_name", "s_major", "s_school", "s_phone", "s_advisor"]) if (last[k] && form[k]) setSelect(form[k], last[k]);
   }
 });
 
@@ -412,13 +450,13 @@ function startNew(from) {
   form.reset(); stopRec(true);
   audioBlob = null; draft = null; priorCount = 0; editing = null;
   $("#edit-banner").hidden = true; $("#save").textContent = "Save meeting";
-  $("#med-block").hidden = $("#med-other").hidden = true;
+  $("#med-block").hidden = $("#med-other").hidden = $("#swap-block").hidden = true;
   $("#audio-preview").innerHTML = ""; $("#history-hint").hidden = true;
   $("#reason-other").hidden = $("#ref-other").hidden = true;
   form.date.value = todayISO(); form.time.value = nowHM();
   if (from) {
     form.category.value = from.category;
-    for (const k of ["s_name", "s_id", "s_major", "s_school", "s_phone", "s_advisor", "g_name", "g_relation", "g_phone"]) if (from[k] && form[k]) form[k].value = from[k];
+    for (const k of ["s_name", "s_id", "s_major", "s_school", "s_phone", "s_advisor", "g_name", "g_relation", "g_phone"]) if (from[k] && form[k]) setSelect(form[k], from[k]);
     if (from.category === "A") { form.meetingNo.value = "Follow-up meeting"; form.withGuardian.value = from.withGuardian || "no"; }
     form.s_id.dispatchEvent(new Event("change"));
   }
@@ -433,13 +471,14 @@ function startEdit(r) {
     const v = r[el.name];
     if (el.type === "checkbox") el.checked = Array.isArray(v) && v.includes(el.value);
     else if (el.type === "radio") el.checked = v === el.value;
-    else if (v !== undefined) el.value = v;
+    else if (v !== undefined) setSelect(el, v);
   }
   priorCount = r.priorCount || 0;
   $("#reason-other").hidden = !(r.reasons || []).includes("Other");
   $("#ref-other").hidden = !(r.referrals || []).includes("Other");
   $("#med-block").hidden = !(r.outcomes || []).includes("Medical issues");
   $("#med-other").hidden = r.medicalType !== "Other";
+  $("#swap-block").hidden = !(r.issues || []).includes("ID card swapped"); $("#swap-own").value = r.s_id || "";
   if (r.audio) showAudio(r.audio, "Saved recording");
   $("#edit-banner").textContent = `Editing ${refNo(r)} — ${whoLabel(r)}. Changes replace the saved record.`;
   $("#edit-banner").hidden = false;
@@ -485,4 +524,4 @@ $("#rec-btn").addEventListener("click", async () => {
 $("#audio-file").addEventListener("change", (e) => { const f = e.target.files[0]; if (f) showAudio(f, f.name); e.target.value = ""; });
 
 /* ---- start ---- */
-renderList();
+loadPrograms(); renderList();

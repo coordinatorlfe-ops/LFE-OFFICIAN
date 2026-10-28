@@ -1,0 +1,19 @@
+{
+  "_note": "Edit this list to add or correct IUB schools and majors. Shown in the Meeting Records dropdowns.",
+  "schools": [
+    { "code": "SBE", "name": "School of Business and Entrepreneurship",
+      "majors": ["Accounting", "Economics", "Finance", "General Management", "Human Resource Management",
+                 "International Business", "Management Information Systems", "Marketing"] },
+    { "code": "SETS", "name": "School of Engineering, Technology and Sciences",
+      "majors": ["Computer Science and Engineering", "Computer Science", "Computer Engineering",
+                 "Electrical and Electronic Engineering", "Electrical and Telecommunication Engineering",
+                 "Physics", "Mathematics"] },
+    { "code": "SELS", "name": "School of Environment and Life Sciences",
+      "majors": ["Environmental Science and Management", "Microbiology", "Biochemistry and Biotechnology"] },
+    { "code": "SLASS", "name": "School of Liberal Arts and Social Sciences",
+      "majors": ["Anthropology", "Sociology", "Global Studies and Governance", "Media and Communication",
+                 "English Literature", "English Language Teaching", "Law"] },
+    { "code": "SPPH", "name": "School of Pharmacy and Public Health",
+      "majors": ["Pharmacy", "Public Health"] }
+  ]
+}

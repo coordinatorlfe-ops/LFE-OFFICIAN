@@ -46,6 +46,7 @@
           <option value="A">A · Student / Guardian</option>
           <option value="B">B · Student (other)</option>
           <option value="C">C · Other</option>
+          <option value="D">D · Monitor / SoD</option>
         </select>
       </div>
       <div id="stats" class="stats"></div>
@@ -77,13 +78,15 @@
           </div>
 
           <h2>Meeting category</h2>
-          <div class="choice-grid">
+          <div class="choice-grid four">
             <label class="choice"><input type="radio" name="category" value="A" required>
               <span><b>A · Student / Guardian</b><small>With or without parents; first or repeat meeting</small></span></label>
             <label class="choice"><input type="radio" name="category" value="B">
               <span><b>B · Student (other)</b><small>Attitude, code of conduct, ID card, other</small></span></label>
             <label class="choice"><input type="radio" name="category" value="C">
               <span><b>C · Other</b><small>Any other meeting</small></span></label>
+            <label class="choice"><input type="radio" name="category" value="D">
+              <span><b>D · Monitor / SoD</b><small>Form status; ID card, behaviour, document issues</small></span></label>
           </div>
 
           <div class="row2">
@@ -94,31 +97,52 @@
 
         <!-- STEP 1: details -->
         <div class="step" data-step="1" hidden>
-          <!-- Student block (A and B) -->
-          <fieldset class="box" data-show="A B">
+          <!-- Student block (A, B, D) -->
+          <fieldset class="box" data-show="A B D">
             <legend>Student</legend>
             <div class="row2">
-              <label class="field"><span>Student name *</span><input name="s_name" data-req="A B"></label>
-              <label class="field"><span>Student ID *</span><input name="s_id" inputmode="numeric" data-req="A B"></label>
+              <label class="field"><span>Student name *</span><input name="s_name" data-req="A B D"></label>
+              <label class="field"><span>Student ID *</span><input name="s_id" inputmode="numeric" data-req="A B D"></label>
             </div>
             <div class="row2">
-              <label class="field"><span>Major</span><input name="s_major"></label>
-              <label class="field" data-show="A"><span>School</span>
-                <input name="s_school" list="schools"></label>
+              <label class="field"><span>Major</span><select name="s_major" class="select full"><option value="">— Select major —</option></select></label>
+              <label class="field" data-show="A D"><span>School</span><select name="s_school" class="select full"><option value="">— Select school —</option></select></label>
             </div>
-            <div class="row2">
+            <div class="row2" data-show="A B">
               <label class="field"><span>Phone number</span><input name="s_phone" type="tel"></label>
               <label class="field" data-show="A"><span>Advisor name</span><input name="s_advisor"></label>
             </div>
             <div id="history-hint" class="hint" hidden></div>
           </fieldset>
-          <datalist id="schools">
-            <option value="SBE — School of Business and Entrepreneurship">
-            <option value="SETS — School of Engineering, Technology and Sciences">
-            <option value="SLASS — School of Liberal Arts and Social Sciences">
-            <option value="SELS — School of Environment and Life Sciences">
-            <option value="SPPH — School of Pharmacy and Public Health">
-          </datalist>
+
+          <!-- Category D: Monitor / SoD -->
+          <fieldset class="box" data-show="D">
+            <legend>Form</legend>
+            <div class="seg" id="form-status">
+              <label><input type="radio" name="formStatus" value="Form taken"><span>Form taken</span></label>
+              <label><input type="radio" name="formStatus" value="Form submitted"><span>Form submitted</span></label>
+              <label><input type="radio" name="formStatus" value="Still pending"><span>Still pending</span></label>
+            </div>
+          </fieldset>
+          <fieldset class="box" data-show="D">
+            <legend>Issues</legend>
+            <div class="issues">
+              <label><input type="checkbox" name="issues" value="No ID card"> <b>1.</b> No ID card</label>
+              <label><input type="checkbox" name="issues" value="ID card swapped" id="swap-cb"> <b>2.</b> ID card swapped</label>
+              <div class="medsub" id="swap-block" hidden>
+                <div class="row2">
+                  <label class="field"><span>This student's ID</span><input id="swap-own" disabled></label>
+                  <label class="field"><span>Other student's ID *</span><input name="swapId" inputmode="numeric"></label>
+                </div>
+              </div>
+              <label><input type="checkbox" name="issues" value="Behaviour issues"> <b>3.</b> Behaviour issues</label>
+              <label><input type="checkbox" name="issues" value="Rude"> <b>4.</b> Rude</label>
+              <label><input type="checkbox" name="issues" value="False document"> <b>5.</b> False document</label>
+              <label><input type="checkbox" name="issues" value="Forgery document"> <b>6.</b> Forgery document</label>
+              <label><input type="checkbox" name="issues" value="Impostor"> <b>7.</b> Impostor</label>
+              <label><input type="checkbox" name="issues" value="Threatening behaviour"> <b>8.</b> Threatening behaviour</label>
+            </div>
+          </fieldset>
 
           <!-- Category A: meeting no. + guardian -->
           <fieldset class="box" data-show="A">
