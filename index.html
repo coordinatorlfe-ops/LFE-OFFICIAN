@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LFE Office · IUB</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="wrap top-inner">
+      <div class="brand">
+        <span class="mark">LFE</span>
+        <div>
+          <div class="brand-title">Live-in Field Experience</div>
+          <div class="brand-sub">Independent University, Bangladesh · Executive Office</div>
+        </div>
+      </div>
+      <nav class="tabs" role="tablist">
+        <button role="tab" data-tab="officials" aria-selected="true">Officials</button>
+        <button role="tab" data-tab="groups" aria-selected="false">Find my group</button>
+        <button role="tab" data-tab="meetings" aria-selected="false">Meetings</button>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <!-- OFFICIALS -->
+    <section id="officials" class="panel" role="tabpanel">
+      <div class="panel-head">
+        <h1>LFE officials</h1>
+        <p class="lede">Who runs the LFE program and how to reach them.</p>
+      </div>
+      <input id="official-search" class="search" type="search" placeholder="Search by name, role or responsibility…" aria-label="Search officials">
+      <div id="official-list" class="cards"></div>
+    </section>
+
+    <!-- GROUP FINDER -->
+    <section id="groups" class="panel" role="tabpanel" hidden>
+      <div class="panel-head">
+        <h1>Find my LFE group</h1>
+        <p class="lede">Enter your IUB student ID to see your section, group, partner campus and field dates.</p>
+      </div>
+      <form id="group-form" class="finder">
+        <input id="student-id" type="text" inputmode="numeric" placeholder="e.g. 2210123" aria-label="Student ID" autocomplete="off" required>
+        <button type="submit">Look up</button>
+      </form>
+      <div id="group-result" aria-live="polite"></div>
+      <p id="semester-note" class="note"></p>
+    </section>
+
+    <!-- MEETINGS -->
+    <section id="meetings" class="panel" role="tabpanel" hidden>
+      <div class="panel-head">
+        <h1>Meetings</h1>
+        <p class="lede">Upcoming LFE meetings, and decisions from past ones.</p>
+      </div>
+      <h2 class="sub">Upcoming</h2>
+      <div id="meetings-upcoming" class="meetings"></div>
+      <h2 class="sub">Past</h2>
+      <div id="meetings-past" class="meetings"></div>
+    </section>
+  </main>
+
+  <footer class="wrap foot">
+    LFE Office, Independent University, Bangladesh · <a href="mailto:coordinator.lfe@iub.edu.bd">coordinator.lfe@iub.edu.bd</a>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

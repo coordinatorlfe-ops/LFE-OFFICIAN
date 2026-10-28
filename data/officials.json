@@ -1,0 +1,35 @@
+[
+  {
+    "name": "Tanvir Ahmed Haroon",
+    "role": "Coordinator, LFE Program",
+    "responsibilities": [
+      "Overall coordination of the LFE program",
+      "Faculty and partner-campus arrangements",
+      "Reports to the Vice-Chancellor through the Executive Office"
+    ],
+    "email": "coordinator.lfe@iub.edu.bd",
+    "phone": "",
+    "office": "LFE Office, Executive Office, IUB"
+  },
+  {
+    "name": "Ms. Tania Islam",
+    "role": "Program Officer",
+    "responsibilities": [
+      "Day-to-day LFE operations",
+      "Student queries and documentation"
+    ],
+    "email": "lfe@iub.edu.bd",
+    "phone": "",
+    "office": "LFE Office, IUB"
+  },
+  {
+    "name": "Ariful Islam",
+    "role": "Junior Program Officer",
+    "responsibilities": [
+      "Administrative support to the LFE Office"
+    ],
+    "email": "lfe@iub.edu.bd",
+    "phone": "",
+    "office": "LFE Office, IUB"
+  }
+]
