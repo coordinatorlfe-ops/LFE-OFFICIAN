@@ -13,7 +13,7 @@ function showTab(name) {
 }
 tabs.forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
 const startTab = location.hash.slice(1);
-if (["officials", "groups", "meetings"].includes(startTab)) showTab(startTab);
+if (["officials", "groups"].includes(startTab)) showTab(startTab);
 
 /* ---------- officials ---------- */
 let officials = [];
@@ -92,29 +92,6 @@ $("#group-form").addEventListener("submit", (e) => {
     <dl>${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}</dl></div>`;
 });
 
-/* ---------- meetings ---------- */
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-function meetingCard(m, past) {
-  const d = new Date(m.date + "T00:00:00");
-  const list = (title, items) => items?.length ? `<h4>${title}</h4><ul>${items.map((i) => `<li>${esc(i)}</li>`).join("")}</ul>` : "";
-  return `<article class="meeting${past ? " past" : ""}">
-    <div class="date-chip"><div class="d">${d.getDate()}</div><div class="m">${MONTHS[d.getMonth()]} ${d.getFullYear()}</div></div>
-    <div>
-      <h3>${esc(m.title)}</h3>
-      <div class="meta">${[m.time, m.place, m.attendees].filter(Boolean).map(esc).join(" · ")}</div>
-      ${list("Agenda", m.agenda)}
-      ${past ? list("Decisions", m.decisions) : ""}
-    </div>
-  </article>`;
-}
-function renderMeetings(meetings) {
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const up = meetings.filter((m) => new Date(m.date + "T00:00:00") >= today).sort((a, b) => a.date.localeCompare(b.date));
-  const past = meetings.filter((m) => new Date(m.date + "T00:00:00") < today).sort((a, b) => b.date.localeCompare(a.date));
-  $("#meetings-upcoming").innerHTML = up.length ? up.map((m) => meetingCard(m, false)).join("") : `<p class="empty">No upcoming meetings scheduled.</p>`;
-  $("#meetings-past").innerHTML = past.length ? past.map((m) => meetingCard(m, true)).join("") : `<p class="empty">No past meetings recorded.</p>`;
-}
-
 /* ---------- load data ---------- */
 async function load(path, asText = false) {
   const r = await fetch(path, { cache: "no-store" });
@@ -133,7 +110,4 @@ async function load(path, asText = false) {
     const rows = parseCSV(await load("data/groups.csv", true));
     students = new Map(rows.map((r) => [String(r.student_id).replace(/\D/g, ""), r]));
   } catch (e) { $("#group-result").innerHTML = `<div class="result miss">Couldn't load group list (${esc(e.message)}).</div>`; }
-
-  try { renderMeetings(await load("data/meetings.json")); }
-  catch (e) { $("#meetings-upcoming").innerHTML = `<p class="empty">Couldn't load meetings (${esc(e.message)}).</p>`; }
 })();

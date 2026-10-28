@@ -4,7 +4,8 @@ A small website for the IUB Live-in Field Experience (LFE) program with three pa
 
 - **Officials** — who runs LFE and how to reach them
 - **Find my group** — students enter their ID and see their section, group, partner campus and dates
-- **Meetings** — upcoming meetings and decisions from past ones
+- **Meetings** (`meetings.html`, staff) — record student/guardian, student and other meetings with outcome, follow-up, referral and audio; PDF per meeting, Excel for all.
+  Records are stored **only in the browser of the computer used** — nothing is uploaded to GitHub. Export to Excel regularly as a backup.
 
 ## Updating the content
 
@@ -16,7 +17,6 @@ Everything shown on the site comes from the `data/` folder. Edit these files on 
 | `data/officials.json` | People shown on the Officials tab |
 | `data/groups.csv` | Student list for the group finder (export from Excel as CSV, same column names) |
 | `data/groups-info.json` | Semester name and the note under the finder |
-| `data/meetings.json` | Meetings; dates in `YYYY-MM-DD`. Past/upcoming is sorted automatically |
 
 `groups.csv` columns: `student_id, name, section, group, venue, field_start, field_end, faculty`
 

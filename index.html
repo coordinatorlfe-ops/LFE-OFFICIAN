@@ -19,7 +19,7 @@
       <nav class="tabs" role="tablist">
         <button role="tab" data-tab="officials" aria-selected="true">Officials</button>
         <button role="tab" data-tab="groups" aria-selected="false">Find my group</button>
-        <button role="tab" data-tab="meetings" aria-selected="false">Meetings</button>
+        <a class="tablink" href="meetings.html">Meetings</a>
       </nav>
     </div>
   </header>
@@ -47,18 +47,6 @@
       </form>
       <div id="group-result" aria-live="polite"></div>
       <p id="semester-note" class="note"></p>
-    </section>
-
-    <!-- MEETINGS -->
-    <section id="meetings" class="panel" role="tabpanel" hidden>
-      <div class="panel-head">
-        <h1>Meetings</h1>
-        <p class="lede">Upcoming LFE meetings, and decisions from past ones.</p>
-      </div>
-      <h2 class="sub">Upcoming</h2>
-      <div id="meetings-upcoming" class="meetings"></div>
-      <h2 class="sub">Past</h2>
-      <div id="meetings-past" class="meetings"></div>
     </section>
   </main>
 

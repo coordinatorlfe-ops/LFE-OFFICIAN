@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>LFE Meetings · Staff</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="meetings.css">
+</head>
+<body>
+  <header class="top">
+    <div class="wrap top-inner">
+      <div class="brand">
+        <span class="mark">LFE</span>
+        <div>
+          <div class="brand-title">Meeting Records</div>
+          <div class="brand-sub">LFE Office · Staff only</div>
+        </div>
+      </div>
+      <nav class="tabs">
+        <a class="tablink" href="index.html">← LFE home</a>
+        <button data-view="list" aria-selected="true">All meetings</button>
+        <button data-view="new" aria-selected="false">+ New meeting</button>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <!-- ============ LIST ============ -->
+    <section id="view-list" class="panel">
+      <div class="list-head">
+        <div>
+          <h1>Meetings</h1>
+          <p class="lede">Records are saved on this computer's browser only.</p>
+        </div>
+        <div class="actions">
+          <button class="btn ghost" id="export-xlsx">Export all to Excel</button>
+          <button class="btn" data-go="new">+ New meeting</button>
+        </div>
+      </div>
+      <div class="filters">
+        <input id="list-search" class="search" type="search" placeholder="Search name, ID, guardian…">
+        <select id="list-cat" class="select">
+          <option value="">All categories</option>
+          <option value="A">A · Student / Guardian</option>
+          <option value="B">B · Student (other)</option>
+          <option value="C">C · Other</option>
+        </select>
+      </div>
+      <div id="stats" class="stats"></div>
+      <div id="records"></div>
+    </section>
+
+    <!-- ============ NEW MEETING WIZARD ============ -->
+    <section id="view-new" class="panel" hidden>
+      <div id="edit-banner" class="hint warn" hidden></div>
+      <ol class="stepper" id="stepper">
+        <li data-step="0">Start</li>
+        <li data-step="1">Meeting details</li>
+        <li data-step="2">Follow-up &amp; referral</li>
+        <li data-step="3">Outcome</li>
+        <li data-step="4">Summary</li>
+      </ol>
+
+      <form id="mform" novalidate>
+        <!-- STEP 0: who + category -->
+        <div class="step" data-step="0">
+          <h2>Who is conducting this meeting?</h2>
+          <div class="choice-grid" id="conductor">
+            <label class="choice"><input type="radio" name="conductedBy" value="LFE Coordinator" required>
+              <span><b>LFE Coordinator</b><small>Tanvir Ahmed Haroon</small></span></label>
+            <label class="choice"><input type="radio" name="conductedBy" value="LFE Program Officer">
+              <span><b>LFE Program Officer</b><small>Ms. Tania Islam</small></span></label>
+            <label class="choice"><input type="radio" name="conductedBy" value="LFE Jr. Program Officer">
+              <span><b>LFE Jr. Program Officer</b><small>Ariful Islam</small></span></label>
+          </div>
+
+          <h2>Meeting category</h2>
+          <div class="choice-grid">
+            <label class="choice"><input type="radio" name="category" value="A" required>
+              <span><b>A · Student / Guardian</b><small>With or without parents; first or repeat meeting</small></span></label>
+            <label class="choice"><input type="radio" name="category" value="B">
+              <span><b>B · Student (other)</b><small>Attitude, code of conduct, ID card, other</small></span></label>
+            <label class="choice"><input type="radio" name="category" value="C">
+              <span><b>C · Other</b><small>Any other meeting</small></span></label>
+          </div>
+
+          <div class="row2">
+            <label class="field"><span>Meeting date</span><input type="date" name="date" required></label>
+            <label class="field"><span>Time</span><input type="time" name="time"></label>
+          </div>
+        </div>
+
+        <!-- STEP 1: details -->
+        <div class="step" data-step="1" hidden>
+          <!-- Student block (A and B) -->
+          <fieldset class="box" data-show="A B">
+            <legend>Student</legend>
+            <div class="row2">
+              <label class="field"><span>Student name *</span><input name="s_name" data-req="A B"></label>
+              <label class="field"><span>Student ID *</span><input name="s_id" inputmode="numeric" data-req="A B"></label>
+            </div>
+            <div class="row2">
+              <label class="field"><span>Major</span><input name="s_major"></label>
+              <label class="field" data-show="A"><span>School</span>
+                <input name="s_school" list="schools"></label>
+            </div>
+            <div class="row2">
+              <label class="field"><span>Phone number</span><input name="s_phone" type="tel"></label>
+              <label class="field" data-show="A"><span>Advisor name</span><input name="s_advisor"></label>
+            </div>
+            <div id="history-hint" class="hint" hidden></div>
+          </fieldset>
+          <datalist id="schools">
+            <option value="SBE — School of Business and Entrepreneurship">
+            <option value="SETS — School of Engineering, Technology and Sciences">
+            <option value="SLASS — School of Liberal Arts and Social Sciences">
+            <option value="SELS — School of Environment and Life Sciences">
+            <option value="SPPH — School of Pharmacy and Public Health">
+          </datalist>
+
+          <!-- Category A: meeting no. + guardian -->
+          <fieldset class="box" data-show="A">
+            <legend>Meeting type</legend>
+            <div class="seg">
+              <label><input type="radio" name="meetingNo" value="First meeting" checked><span>First meeting</span></label>
+              <label><input type="radio" name="meetingNo" value="Follow-up meeting"><span>Follow-up meeting</span></label>
+            </div>
+            <div class="seg">
+              <label><input type="radio" name="withGuardian" value="no" checked><span>Without guardian</span></label>
+              <label><input type="radio" name="withGuardian" value="yes"><span>With guardian / parent</span></label>
+            </div>
+            <div id="guardian-block" hidden>
+              <div class="row3">
+                <label class="field"><span>Guardian name *</span><input name="g_name"></label>
+                <label class="field"><span>Relation</span><input name="g_relation" list="relations" placeholder="Father, Mother…"></label>
+                <label class="field"><span>Guardian phone</span><input name="g_phone" type="tel"></label>
+              </div>
+            </div>
+            <datalist id="relations"><option value="Father"><option value="Mother"><option value="Brother"><option value="Sister"><option value="Uncle"><option value="Aunt"><option value="Local guardian"></datalist>
+          </fieldset>
+
+          <!-- Category B: reasons -->
+          <fieldset class="box" data-show="B">
+            <legend>Cause / reason</legend>
+            <div class="checks">
+              <label><input type="checkbox" name="reasons" value="Attitude"> Attitude</label>
+              <label><input type="checkbox" name="reasons" value="Code of Conduct"> Code of Conduct</label>
+              <label><input type="checkbox" name="reasons" value="ID card"> ID card</label>
+              <label><input type="checkbox" name="reasons" value="Other" id="reason-other-cb"> Other</label>
+            </div>
+            <label class="field" id="reason-other" hidden><span>Other reason</span><input name="reasonOther"></label>
+          </fieldset>
+
+          <!-- Category C -->
+          <fieldset class="box" data-show="C">
+            <legend>Meeting</legend>
+            <label class="field"><span>Meeting title *</span><input name="c_title" data-req="C"></label>
+            <label class="field"><span>Participants</span><input name="c_participants" placeholder="Names / offices present"></label>
+          </fieldset>
+
+          <fieldset class="box">
+            <legend>Comments from LFE official</legend>
+            <textarea name="comments" rows="5" placeholder="What was discussed, what the student / guardian said, any undertaking given…"></textarea>
+          </fieldset>
+        </div>
+
+        <!-- STEP 2: follow-up, referral, audio -->
+        <div class="step" data-step="2" hidden>
+          <fieldset class="box">
+            <legend>Follow-up</legend>
+            <label class="field narrow"><span>Follow-up date</span><input type="date" name="followDate"></label>
+            <label class="field"><span>Suggestions for follow-up</span>
+              <textarea name="followSuggestions" rows="3"></textarea></label>
+          </fieldset>
+
+          <fieldset class="box">
+            <legend>Referral to another office</legend>
+            <div class="checks">
+              <label><input type="checkbox" name="referrals" value="Proctor"> Proctor</label>
+              <label><input type="checkbox" name="referrals" value="DoSA"> DoSA</label>
+              <label><input type="checkbox" name="referrals" value="Gender & Sexual Harassment (via Proctor)"> Gender &amp; Sexual Harassment (via Proctor)</label>
+              <label><input type="checkbox" name="referrals" value="Other" id="ref-other-cb"> Other</label>
+            </div>
+            <label class="field" id="ref-other" hidden><span>Other office</span><input name="referralOther"></label>
+            <label class="field"><span>Referral note</span><input name="referralNote" placeholder="Reference no., date sent, contact person…"></label>
+          </fieldset>
+
+          <fieldset class="box">
+            <legend>Audio recording</legend>
+            <p class="hint">Inform everyone present before recording.</p>
+            <div class="audio-bar">
+              <button type="button" class="btn rec" id="rec-btn">● Start recording</button>
+              <span id="rec-time" class="rec-time"></span>
+              <span class="or">or</span>
+              <label class="btn ghost file-btn">Upload audio file<input type="file" id="audio-file" accept="audio/*" hidden></label>
+            </div>
+            <div id="audio-preview"></div>
+          </fieldset>
+        </div>
+
+        <!-- STEP 3: outcome (before closing the meeting) -->
+        <div class="step" data-step="3" hidden>
+          <h2>Before closing the meeting</h2>
+          <p class="hint">Tick everything that applies. Leave all unticked if none.</p>
+          <fieldset class="box outcome">
+            <legend>Outcome</legend>
+            <label class="ocheck"><input type="checkbox" name="outcomes" value="More investigation needed"><span><b>A.</b> More investigation needed</span></label>
+
+            <label class="ocheck"><input type="checkbox" name="outcomes" value="Medical issues" id="med-cb"><span><b>B.</b> Medical issues</span></label>
+            <div class="medsub" id="med-block" hidden>
+              <div class="radios">
+                <label><input type="radio" name="medicalType" value="Psychological"> Psychological</label>
+                <label><input type="radio" name="medicalType" value="Drug"> Drug</label>
+                <label><input type="radio" name="medicalType" value="Both (psychological and drug)"> Both (psychological and drug)</label>
+                <label><input type="radio" name="medicalType" value="Pregnancy"> Pregnancy</label>
+                <label><input type="radio" name="medicalType" value="Physical disability"> Physical disability</label>
+                <label><input type="radio" name="medicalType" value="Other"> Other</label>
+              </div>
+              <label class="field" id="med-other" hidden><span>Explain *</span><input name="medicalOther"></label>
+            </div>
+
+            <label class="ocheck"><input type="checkbox" name="outcomes" value="Disciplinary issues"><span><b>C.</b> Disciplinary issues</span></label>
+            <label class="ocheck"><input type="checkbox" name="outcomes" value="Proctorial issues"><span><b>D.</b> Proctorial issues</span></label>
+          </fieldset>
+          <fieldset class="box">
+            <legend>Outcome note</legend>
+            <textarea name="outcomeNote" rows="3" placeholder="Optional: anything to add about the outcome"></textarea>
+          </fieldset>
+        </div>
+
+        <!-- STEP 4: summary -->
+        <div class="step" data-step="4" hidden>
+          <div id="summary"></div>
+        </div>
+
+        <div class="wizard-nav">
+          <button type="button" class="btn ghost" id="back">← Back</button>
+          <span class="spacer"></span>
+          <button type="button" class="btn" id="next">Next →</button>
+          <button type="button" class="btn ghost" id="pdf-btn" hidden>Download PDF</button>
+          <button type="button" class="btn" id="save" hidden>Save meeting</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- ============ VIEW ONE RECORD ============ -->
+    <section id="view-record" class="panel" hidden>
+      <button class="btn ghost" data-go="list">← All meetings</button>
+      <div id="record-body"></div>
+      <div class="wizard-nav">
+        <button class="btn danger ghost" id="rec-delete">Delete</button>
+        <span class="spacer"></span>
+        <button class="btn ghost" id="rec-edit">Edit</button>
+        <button class="btn ghost" id="rec-followup">Start follow-up meeting</button>
+        <button class="btn" id="rec-pdf">Download PDF</button>
+      </div>
+    </section>
+  </main>
+
+  <script src="vendor/jspdf.umd.min.js"></script>
+  <script src="vendor/xlsx.full.min.js"></script>
+  <script src="meetings.js"></script>
+</body>
+</html>
