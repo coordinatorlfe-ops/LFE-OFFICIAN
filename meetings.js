@@ -20,9 +20,11 @@ function setSelect(el, v) {
   el.value = v;
 }
 async function loadPrograms() {
-  let data;
-  try { data = await (await fetch("data/iub-programs.json", { cache: "no-store" })).json(); }
-  catch { data = { schools: [] }; }
+  let data = window.IUB_PROGRAMS;
+  if (!data) {
+    try { data = await (await fetch("data/iub-programs.json", { cache: "no-store" })).json(); }
+    catch { data = { schools: [] }; }
+  }
   const maj = document.querySelector('[name="s_major"]'), sch = document.querySelector('[name="s_school"]');
   const majorToSchool = {};
   for (const sc of data.schools) {

@@ -23,3 +23,11 @@ Everything shown on the site comes from the `data/` folder. Edit these files on 
 
 > Note: this repository is public, so anyone can download `groups.csv`. Only include what students
 > need to see (avoid phone numbers, CGPA, etc.).
+
+## Offline single-file version
+
+`LFE_Meeting_Records.html` is the whole Meeting Records app in one file. Download it and double-click
+to open in Chrome or Edge, with no internet needed. Records are saved in that browser on that computer, the same as the
+online version. **Records entered in the offline file and on the website are kept separately** — pick one and stick to it.
+
+To rebuild it after changes: `python3 tools/build_standalone.py`
