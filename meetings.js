@@ -38,30 +38,99 @@ async function loadPrograms() {
   maj.addEventListener("change", () => { if (majorToSchool[maj.value]) sch.value = majorToSchool[maj.value]; });
 }
 
-/* ================= storage (IndexedDB) ================= */
+/* ================= encryption ================= */
+// Records and audio are encrypted (AES-GCM) with a data key. The data key is kept on the device only
+// in encrypted form, unlocked by a staff password (or the Coordinator's recovery code).
+const te = new TextEncoder(), td = new TextDecoder();
+function toB64(buf) {
+  const a = new Uint8Array(buf); let s = "";
+  for (let i = 0; i < a.length; i += 0x8000) s += String.fromCharCode.apply(null, a.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+const fromB64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+const rand = (n) => crypto.getRandomValues(new Uint8Array(n));
+async function deriveKeys(pw, saltB64) {
+  const salt = saltB64 ? fromB64(saltB64) : rand(16);
+  const base = await crypto.subtle.importKey("raw", te.encode(pw), "PBKDF2", false, ["deriveBits"]);
+  const bits = new Uint8Array(await crypto.subtle.deriveBits({ name: "PBKDF2", salt, iterations: 250000, hash: "SHA-256" }, base, 512));
+  const key = await crypto.subtle.importKey("raw", bits.slice(32), "AES-GCM", false, ["encrypt", "decrypt"]);
+  return { salt: toB64(salt), verify: toB64(bits.slice(0, 32)), key };
+}
+async function seal(key, bytes) { const iv = rand(12); return { iv: toB64(iv), ct: await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, bytes) }; }
+const unseal = (key, box) => crypto.subtle.decrypt({ name: "AES-GCM", iv: fromB64(box.iv) }, key, box.ct);
+const newDataKey = () => crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
+async function wrapDK(dk, key) { const b = await seal(key, await crypto.subtle.exportKey("raw", dk)); return { iv: b.iv, ct: toB64(b.ct) }; }
+async function unwrapDK(w, key) {
+  const raw = await unseal(key, { iv: w.iv, ct: fromB64(w.ct) });
+  return crypto.subtle.importKey("raw", raw, "AES-GCM", true, ["encrypt", "decrypt"]);
+}
+
+/* ================= storage (IndexedDB, encrypted) ================= */
+let DK = null;   // data key — in memory only while someone is signed in
+let ALL = [];    // last loaded list of records (used for earlier-meeting counts)
 const DB = {
-  _db: null,
+  _db: null, _cache: null,
   open() {
     if (this._db) return Promise.resolve(this._db);
     return new Promise((res, rej) => {
-      const r = indexedDB.open("lfe-meetings", 1);
-      r.onupgradeneeded = () => r.result.createObjectStore("meetings", { keyPath: "id" });
+      const r = indexedDB.open("lfe-meetings", 2);
+      r.onupgradeneeded = () => {
+        for (const n of ["meetings", "recs", "audio"]) if (!r.result.objectStoreNames.contains(n)) r.result.createObjectStore(n, { keyPath: "id" });
+      };
       r.onsuccess = () => res((this._db = r.result));
       r.onerror = () => rej(r.error);
     });
   },
-  async tx(mode, fn) {
+  async req(store, mode, fn) {
     const db = await this.open();
     return new Promise((res, rej) => {
-      const t = db.transaction("meetings", mode);
-      const out = fn(t.objectStore("meetings"));
-      t.oncomplete = () => res(out && out.result !== undefined ? out.result : out);
-      t.onerror = () => rej(t.error);
+      const t = db.transaction(store, mode), q = fn(t.objectStore(store));
+      t.oncomplete = () => res(q?.result);
+      t.onerror = t.onabort = () => rej(t.error);
     });
   },
-  all() { return this.tx("readonly", (s) => s.getAll()); },
-  put(rec) { return this.tx("readwrite", (s) => s.put(rec)); },
-  del(id) { return this.tx("readwrite", (s) => s.delete(id)); },
+  // all records, decrypted, without audio
+  async all() {
+    if (!this._cache) {
+      const rows = await this.req("recs", "readonly", (s) => s.getAll());
+      this._cache = await Promise.all(rows.map(async (x) => JSON.parse(td.decode(await unseal(DK, x)))));
+      ALL = this._cache;
+    }
+    return this._cache.map((r) => ({ ...r }));
+  },
+  // audio: a Blob to store, null to remove, undefined to leave as it is
+  async put(rec, audio) {
+    const { audio: _skip, ...meta } = rec;
+    meta.hasAudio = audio === undefined ? !!meta.hasAudio : !!audio;
+    const box = await seal(DK, te.encode(JSON.stringify(meta)));
+    await this.req("recs", "readwrite", (s) => s.put({ id: meta.id, ...box }));
+    if (audio) {
+      const ab = await seal(DK, await audio.arrayBuffer());
+      await this.req("audio", "readwrite", (s) => s.put({ id: meta.id, type: audio.type || "audio/webm", ...ab }));
+    } else if (audio === null) await this.req("audio", "readwrite", (s) => s.delete(meta.id));
+    this._cache = null;
+  },
+  async audio(id) {
+    const x = await this.req("audio", "readonly", (s) => s.get(id));
+    return x ? new Blob([await unseal(DK, x)], { type: x.type }) : null;
+  },
+  async del(id) {
+    await this.req("recs", "readwrite", (s) => s.delete(id));
+    await this.req("audio", "readwrite", (s) => s.delete(id));
+    this._cache = null;
+  },
+  // encrypt records saved by the earlier (unencrypted) version, then remove the plain copies
+  async migrate() {
+    const old = await this.req("meetings", "readonly", (s) => s.getAll());
+    for (const r of old) {
+      if (!r.ref) r.ref = makeRef(r);
+      const a = r.audio; delete r.audio;
+      await this.put(r, a || null);
+    }
+    if (old.length) await this.req("meetings", "readwrite", (s) => s.clear());
+    return old.length;
+  },
+  forget() { this._cache = null; ALL = []; },
 };
 
 /* ================= helpers ================= */
@@ -80,7 +149,13 @@ const nowHM = () => new Date().toTimeString().slice(0, 5);
 const list = (arr, other) => (arr || []).map((v) => (v === "Other" && other ? `Other (${other})` : v)).join(", ");
 const medText = (r) => r.medicalType === "Other" ? `Other (${r.medicalOther})` : r.medicalType;
 const outcomeText = (r) => (r.outcomes || []).map((o) => (o === "Medical issues" && r.medicalType ? `Medical issues: ${medText(r)}` : o)).join("; ");
-const refNo = (r) => `LFE-M-${r.date.replace(/-/g, "").slice(2)}-${r.id.slice(-4).toUpperCase()}`;
+const makeRef = (r) => `LFE-M-${r.date.replace(/-/g, "").slice(2)}-${r.id.slice(-4).toUpperCase()}`;
+const refNo = (r) => r.ref || makeRef(r); // fixed when the record is first saved, so editing the date does not change it
+// earlier meetings with the same student, worked out from the records on file (not stored)
+const priorOf = (r) => !r.s_id ? 0 : ALL.length
+  ? ALL.filter((x) => x.s_id === r.s_id && x.id !== r.id && (x.date + (x.time || "")) < (r.date + (r.time || ""))).length
+  : r.priorCount || 0;
+const followState = (r) => !r.followDate ? "" : r.followDone ? "done" : r.followDate < todayISO() ? "overdue" : "open";
 
 function whoLabel(r) {
   if (r.category === "C") return r.c_title || "Meeting";
@@ -102,14 +177,14 @@ function narrative(r) {
     else if (r.category === "A") s += " without a guardian present";
     s += ".";
     p.push(s);
-    if (r.category === "A") p.push(`This was a ${r.meetingNo.toLowerCase()}${r.priorCount ? `; ${r.priorCount} earlier meeting(s) with this student are on record` : ""}.`);
+    if (r.category === "A") p.push(`This was a ${r.meetingNo.toLowerCase()}${priorOf(r) ? `; ${priorOf(r)} earlier meeting(s) with this student are on record` : ""}.`);
     if (r.category === "D") p.push(`Monitor / SoD form: ${(r.formStatus || "status not recorded").toLowerCase()}.${r.issues?.length ? " Issues noted: " + issueText(r) + "." : " No issues noted."}`);
     if (r.category === "B" && r.reasons?.length) p.push(`The meeting concerned: ${list(r.reasons, r.reasonOther)}.`);
   }
   if (r.outcomes?.length) p.push(`Outcome: ${outcomeText(r)}.`);
-  if (r.followDate) p.push(`A follow-up is set for ${fmtDate(r.followDate)}.`);
+  if (r.followDate) p.push(r.followDone ? `The follow-up set for ${fmtDate(r.followDate)} has been completed.` : `A follow-up is set for ${fmtDate(r.followDate)}.`);
   if (r.referrals?.length) p.push(`The matter has been referred to: ${list(r.referrals, r.referralOther)}.`);
-  if (r.hasAudio) p.push("An audio recording of the meeting is on file.");
+  if (r.hasAudio) p.push(`An audio recording of the meeting is on file${r.audioConsent === "yes" ? ", made with the agreement of those present" : ""}.`);
   return p.join(" ");
 }
 
@@ -138,11 +213,11 @@ function sections(r) {
   if (r.category === "B") S.push(["Cause / reason", [["Reason(s)", list(r.reasons, r.reasonOther) || "—"]]]);
   S.push(["Comments from LFE official", [["", r.comments || "—"]]]);
   S.push(["Follow-up & referral", [
-    ["Follow-up date", r.followDate ? fmtDate(r.followDate) : "—"],
+    ["Follow-up date", r.followDate ? `${fmtDate(r.followDate)} (${{ done: "done", overdue: "overdue", open: "pending" }[followState(r)]})` : "—"],
     ["Suggestions", r.followSuggestions || "—"],
     ["Referred to", list(r.referrals, r.referralOther) || "None"],
     r.referralNote && ["Referral note", r.referralNote],
-    ["Audio recording", r.hasAudio ? "Yes" : "No"],
+    ["Audio recording", r.hasAudio ? (r.audioConsent === "yes" ? "Yes — consent of those present recorded" : "Yes") : "No"],
   ]]);
   S.push(["Outcome", [
     ["More investigation", (r.outcomes || []).includes("More investigation needed") ? "Needed" : "No"],
@@ -215,7 +290,26 @@ function setupApp() {
 }
 
 /* ================= PDF ================= */
+// The built-in PDF fonts only cover Latin text. For Bangla (or other scripts) use the browser's own
+// print window instead, which draws every script correctly ("Save as PDF").
+const PDF_SAFE = /^[\x00-\xFF\u2013\u2014\u2018\u2019\u201C\u201D\u2022\u2026\u20AC]*$/;
+function printRecord(r) {
+  const area = $("#print-area");
+  area.innerHTML = `<div class="print-head"><b>LFE Office — Meeting Summary</b><span>${esc(refNo(r))} · CONFIDENTIAL</span></div>
+    ${summaryHTML(r, null)}
+    <div class="print-sign"><div>${esc(OFFICERS[r.conductedBy])}<br>${esc(r.conductedBy)}</div>
+    <div>${r.category === "A" && r.withGuardian === "yes" ? "Guardian" : r.category === "C" ? "Witness" : "Student"}</div></div>`;
+  document.body.classList.add("printing");
+  const done = () => { document.body.classList.remove("printing"); area.innerHTML = ""; removeEventListener("afterprint", done); };
+  addEventListener("afterprint", done);
+  setTimeout(() => window.print(), 50);
+}
 function makePDF(r) {
+  const allText = [narrative(r), ...sections(r).flatMap(([t, rows]) => [t, ...rows.flat()]), r.c_title, r.s_name].join(" ");
+  if (!PDF_SAFE.test(allText)) {
+    toast("Bangla text found — use the print window and choose “Save as PDF”");
+    return printRecord(r);
+  }
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: "pt", format: "a4" });
   const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight(), M = 50;
@@ -279,8 +373,9 @@ function makePDF(r) {
 async function exportExcel() {
   const recs = (await DB.all()).sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
   if (!recs.length) return alert("No meetings to export yet.");
+  const asDate = (d) => (d ? new Date(d + "T00:00:00") : "");
   const rows = recs.map((r) => ({
-    "Reference": refNo(r), "Date": r.date, "Time": r.time, "Category": `${r.category} · ${CAT_NAME[r.category]}`,
+    "Reference": refNo(r), "Date": asDate(r.date), "Time": r.time ? fmtTime(r.time) : "", "Category": `${r.category} · ${CAT_NAME[r.category]}`,
     "Conducted by": `${OFFICERS[r.conductedBy]} (${r.conductedBy})`,
     "Meeting type": r.meetingNo || "", "Meeting title": r.c_title || "", "Participants": r.c_participants || "",
     "Student name": r.s_name || "", "Student ID": r.s_id || "", "Major": r.s_major || "", "School": r.s_school || "",
@@ -289,9 +384,10 @@ async function exportExcel() {
     "Guardian name": r.g_name || "", "Guardian relation": r.g_relation || "", "Guardian phone": r.g_phone || "",
     "Reason(s)": list(r.reasons, r.reasonOther),
     "Form status (D)": r.formStatus || "", "Issues (D)": issueText(r), "Swapped with ID": r.swapId || "", "Comments": r.comments || "",
-    "Follow-up date": r.followDate || "", "Follow-up suggestions": r.followSuggestions || "",
+    "Follow-up date": asDate(r.followDate),
+    "Follow-up status": { done: "Done", overdue: "Overdue", open: "Pending", "": "" }[followState(r)], "Follow-up suggestions": r.followSuggestions || "",
     "Referred to": list(r.referrals, r.referralOther), "Referral note": r.referralNote || "",
-    "Audio recorded": r.hasAudio ? "Yes" : "No",
+    "Audio recorded": r.hasAudio ? "Yes" : "No", "Recording consent": r.hasAudio ? (r.audioConsent === "yes" ? "Yes" : "Not recorded") : "",
     "More investigation needed": (r.outcomes || []).includes("More investigation needed") ? "Yes" : "",
     "Medical issue": (r.outcomes || []).includes("Medical issues") ? medText(r) || "Yes" : "",
     "Disciplinary issues": (r.outcomes || []).includes("Disciplinary issues") ? "Yes" : "",
@@ -301,14 +397,17 @@ async function exportExcel() {
     "Last edited": r.editedAt ? new Date(r.editedAt).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" }) : "",
     "Summary": narrative(r),
   }));
-  const ws = XLSX.utils.json_to_sheet(rows);
-  ws["!cols"] = Object.keys(rows[0]).map((k) => ({ wch: ["Comments", "Summary", "Follow-up suggestions"].includes(k) ? 60 : Math.max(12, k.length + 2) }));
-  ws["!autofilter"] = { ref: ws["!ref"] };
+  const sheet = (data) => {
+    const ws = XLSX.utils.json_to_sheet(data, { cellDates: true, dateNF: "d mmm yyyy" });
+    ws["!cols"] = Object.keys(rows[0]).map((k) => ({ wch: ["Comments", "Summary", "Follow-up suggestions"].includes(k) ? 60 : Math.max(12, k.length + 2) }));
+    ws["!autofilter"] = { ref: ws["!ref"] };
+    return ws;
+  };
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "All meetings");
+  XLSX.utils.book_append_sheet(wb, sheet(rows), "All meetings");
   for (const c of CATS) {
     const sub = rows.filter((r) => r.Category.startsWith(c));
-    if (sub.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sub), `Category ${c}`);
+    if (sub.length) XLSX.utils.book_append_sheet(wb, sheet(sub), `Category ${c}`);
   }
   const out = XLSX.write(wb, { bookType: "xlsx", type: "array" });
   saveBlob(new Blob([out], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), `LFE_Meetings_${todayISO()}.xlsx`);
@@ -329,12 +428,18 @@ async function renderList() {
   const q = $("#list-search").value.trim().toLowerCase(), cat = $("#list-cat").value;
   const recs = all.filter((r) => (!cat || r.category === cat) &&
     (!q || [r.s_name, r.s_id, r.g_name, r.c_title, r.comments, r.conductedBy].join(" ").toLowerCase().includes(q)));
-  const today = todayISO();
-  const due = all.filter((r) => r.followDate && r.followDate >= today).length;
+  const due = all.filter((r) => followState(r) === "open").length;
+  const overdue = all.filter((r) => followState(r) === "overdue").length;
+  const lastBk = localStorage.getItem("lfe-last-backup");
+  const bkDays = lastBk ? Math.floor((Date.now() - new Date(lastBk)) / 864e5) : null;
+  $("#backup-note").hidden = !all.length || (bkDays !== null && bkDays < 7);
+  $("#backup-note").textContent = bkDays === null ? "No backup made on this device yet — click ⬇ Backup so records are not lost if this device fails."
+    : `Last backup was ${bkDays} days ago. Click ⬇ Backup to make a new one.`;
   $("#stats").innerHTML = `
     <div class="stat"><b>${all.length}</b>meetings</div>
     ${CATS.map((c) => `<div class="stat"><b>${all.filter((r) => r.category === c).length}</b>${c} · ${CAT_NAME[c]}</div>`).join("")}
-    <div class="stat"><b>${due}</b>follow-ups upcoming</div>
+    <div class="stat"><b>${due}</b>follow-ups due</div>
+    <div class="stat${overdue ? " alert" : ""}"><b>${overdue}</b>follow-ups overdue</div>
     <div class="stat"><b>${all.filter((r) => r.referrals?.length).length}</b>referred</div>`;
   if (!recs.length) {
     $("#records").innerHTML = `<p class="empty">${all.length ? "No meetings match." : "No meetings yet. Click “+ New meeting” to record one."}</p>`;
@@ -353,7 +458,7 @@ async function renderList() {
         ${(r.issues || []).map((x) => `<span class="pill iss">${esc(x)}</span>`).join("")}
         ${(r.outcomes || []).map((o) => `<span class="pill out">${esc(o === "Medical issues" ? "Medical" : o.replace(" issues", "").replace(" needed", ""))}</span>`).join("")}
         ${r.hasAudio ? '<span class="pill">🎙 audio</span>' : ""}</td>
-      <td>${r.followDate ? esc(fmtDate(r.followDate)) : "—"}</td></tr>`).join("")}
+      <td>${r.followDate ? `<span class="fu ${followState(r)}">${esc(fmtDate(r.followDate))}${followState(r) === "done" ? " ✓" : followState(r) === "overdue" ? "<br><small>overdue</small>" : ""}</span>` : "—"}</td></tr>`).join("")}
   </tbody></table>`;
   $$("#records tr.click").forEach((tr) => tr.addEventListener("click", () => openRecord(tr.dataset.id)));
 }
@@ -366,9 +471,12 @@ let current = null, currentURL = null;
 async function openRecord(id) {
   current = (await DB.all()).find((r) => r.id === id);
   if (currentURL) URL.revokeObjectURL(currentURL);
-  currentURL = current.audio ? URL.createObjectURL(current.audio) : null;
+  const blob = current.hasAudio ? await DB.audio(id) : null;
+  currentURL = blob ? URL.createObjectURL(blob) : null;
   $("#record-body").innerHTML = summaryHTML(current, currentURL);
   $("#rec-followup").hidden = current.category === "C";
+  $("#rec-done").hidden = !current.followDate;
+  $("#rec-done").textContent = current.followDone ? "Reopen follow-up" : "✓ Mark follow-up done";
   showView("record");
 }
 $("#rec-pdf").addEventListener("click", () => makePDF(current));
@@ -378,11 +486,16 @@ $("#rec-delete").addEventListener("click", async () => {
 });
 $("#rec-followup").addEventListener("click", () => startNew(current));
 $("#rec-edit").addEventListener("click", () => startEdit(current));
+$("#rec-done").addEventListener("click", async () => {
+  current.followDone = !current.followDone;
+  await DB.put(current); toast(current.followDone ? "Follow-up marked done" : "Follow-up reopened");
+  openRecord(current.id);
+});
 
 /* ================= wizard ================= */
 const form = $("#mform");
 const LAST = 4;
-let step = 0, audioBlob = null, draft = null, editing = null;
+let step = 0, audioBlob = null, draft = null, editing = null, followOf = null;
 
 function cat() { return form.category.value; }
 function applyCategory() {
@@ -428,6 +541,7 @@ function validate(n) {
     if (cat() === "D" && $("#swap-cb").checked && !form.swapId.value.trim()) bad.push(form.swapId);
     if (cat() === "B" && !$$('[name="reasons"]:checked', form).length) bad.push($(".checks", $('[data-show="B"]')));
   }
+  if (n === 2 && audioBlob && !$("#consent-cb").checked) bad.push($("#consent-cb").closest("label"));
   if (n === 3 && $("#med-cb").checked) {
     if (!form.medicalType.value) bad.push($(".radios", form));
     else if (form.medicalType.value === "Other" && !form.medicalOther.value.trim()) bad.push(form.medicalOther);
@@ -462,6 +576,10 @@ function collect() {
   if (editing) r.editedBy = me?.email || "";
   r.id = editing?.id || draft?.id || crypto.randomUUID?.() || String(Date.now()) + Math.random().toString(16).slice(2);
   r.hasAudio = !!audioBlob;
+  if (!audioBlob) delete r.audioConsent;
+  r.ref = editing?.ref || makeRef(r);
+  if (editing) { if (editing.followOf) r.followOf = editing.followOf; if (editing.followDone && r.followDate === editing.followDate) r.followDone = true; }
+  else if (followOf) r.followOf = followOf;
   r.priorCount = priorCount;
   return r;
 }
@@ -494,8 +612,13 @@ form.s_id.addEventListener("change", async () => {
 });
 
 $("#save").addEventListener("click", async () => {
-  const rec = { ...draft, audio: audioBlob || null, createdAt: draft.createdAt || new Date().toISOString() };
-  await DB.put(rec);
+  const rec = { ...draft, createdAt: draft.createdAt || new Date().toISOString() };
+  await DB.put(rec, audioBlob || null);
+  // a follow-up meeting closes the follow-up on the meeting it came from
+  if (!editing && rec.followOf) {
+    const src = (await DB.all()).find((x) => x.id === rec.followOf);
+    if (src && src.followDate && !src.followDone) { src.followDone = true; await DB.put(src); }
+  }
   const wasEdit = editing; editing = null;
   toast(wasEdit ? "Changes saved" : "Meeting saved");
   if (wasEdit) openRecord(rec.id); else { showView("list"); await renderList(); }
@@ -504,7 +627,7 @@ $("#pdf-btn").addEventListener("click", () => makePDF(draft));
 
 function startNew(from) {
   form.reset(); stopRec(true);
-  audioBlob = null; draft = null; priorCount = 0; editing = null;
+  audioBlob = null; draft = null; priorCount = 0; editing = null; followOf = from?.id || null;
   $("#edit-banner").hidden = true; $("#save").textContent = "Save meeting";
   $("#med-block").hidden = $("#med-other").hidden = $("#swap-block").hidden = true;
   $("#audio-preview").innerHTML = ""; $("#history-hint").hidden = true;
@@ -526,7 +649,7 @@ function startEdit(r) {
   for (const el of form.elements) {
     if (!el.name || el.type === "file") continue;
     const v = r[el.name];
-    if (el.type === "checkbox") el.checked = Array.isArray(v) && v.includes(el.value);
+    if (el.type === "checkbox") el.checked = Array.isArray(v) ? v.includes(el.value) : v === el.value;
     else if (el.type === "radio") el.checked = v === el.value;
     else if (v !== undefined) setSelect(el, v);
   }
@@ -537,7 +660,7 @@ function startEdit(r) {
   $("#med-block").hidden = !(r.outcomes || []).includes("Medical issues");
   $("#med-other").hidden = r.medicalType !== "Other";
   $("#swap-block").hidden = !(r.issues || []).includes("ID card swapped"); $("#swap-own").value = r.s_id || "";
-  if (r.audio) showAudio(r.audio, "Saved recording");
+  if (r.hasAudio) DB.audio(r.id).then((b) => { if (b && editing?.id === r.id) showAudio(b, "Saved recording"); });
   $("#edit-banner").textContent = `Editing ${refNo(r)} — ${whoLabel(r)}. Changes replace the saved record.`;
   $("#edit-banner").hidden = false;
   $("#save").textContent = "Save changes";
@@ -582,16 +705,20 @@ $("#rec-btn").addEventListener("click", async () => {
 $("#audio-file").addEventListener("change", (e) => { const f = e.target.files[0]; if (f) showAudio(f, f.name); e.target.value = ""; });
 
 /* ================= sign in ================= */
-// Accounts are kept on this device (localStorage). Passwords are stored only as salted PBKDF2 hashes.
+// Accounts are kept on this device (localStorage). For each person we store only a salted PBKDF2
+// check value and the data key encrypted with their password — never the password itself.
 const COORD_EMAIL = "coordinator.lfe@iub.edu.bd"; // fixed — cannot be removed or changed
 const ROLES = ["LFE Coordinator", "LFE Program Officer", "LFE Jr. Program Officer"];
 const DEFAULT_USERS = {
   "LFE Program Officer": ["t.islam@iub.edu.bd"],
   "LFE Jr. Program Officer": ["arif.tanz@iub.edu.bd"],
 };
-const AUTH_KEY = "lfe-auth-v1", SESSION_KEY = "lfe-session", IDLE_MIN = 30;
+const AUTH_KEY = "lfe-auth-v2", IDLE_MIN = 30;
 const normEmail = (e) => String(e || "").trim().toLowerCase();
 const isEmail = (e) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e);
+const B32 = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const randCode = (n) => [...rand(n)].map((x) => B32[x % 32]).join("");
+const normCode = (c) => String(c || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 
 const Auth = {
   load() {
@@ -609,108 +736,169 @@ const Auth = {
     if (email === COORD_EMAIL) return ROLES[0];
     return ROLES.slice(1).find((r) => a.users[r].includes(email)) || null;
   },
+  async setPassword(a, email, pw, dk, temp = false) {
+    const k = await deriveKeys(pw);
+    a.pw[email] = { salt: k.salt, verify: k.verify, wrap: await wrapDK(dk, k.key), ...(temp ? { temp: true } : {}) };
+  },
+  async newRecovery(a, dk) {
+    const code = randCode(20), k = await deriveKeys(code);
+    a.recovery = { salt: k.salt, verify: k.verify, wrap: await wrapDK(dk, k.key) };
+    return code.match(/.{5}/g).join("-");
+  },
 };
 
-const b64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
-async function hashPw(pw, saltB64) {
-  const salt = saltB64 ? Uint8Array.from(atob(saltB64), (c) => c.charCodeAt(0)) : crypto.getRandomValues(new Uint8Array(16));
-  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(pw), "PBKDF2", false, ["deriveBits"]);
-  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", salt, iterations: 200000, hash: "SHA-256" }, key, 256);
-  return { salt: b64(salt), hash: b64(bits) };
-}
-
 let me = null, lastUser = null, started = false, lastActive = Date.now(), failures = 0;
+let mode = "login", pending = null; // pending: someone who signed in with a temporary password
 const isCoord = () => me?.role === ROLES[0];
-
-function getSession() {
-  try {
-    const s = JSON.parse(sessionStorage.getItem(SESSION_KEY));
-    if (s && Date.now() - s.t < IDLE_MIN * 60000 && Auth.roleOf(s.email) === s.role) return s;
-  } catch {}
-  return null;
-}
-function touch() {
-  lastActive = Date.now();
-  if (me) sessionStorage.setItem(SESSION_KEY, JSON.stringify({ email: me.email, role: me.role, t: lastActive }));
-}
+const touch = () => (lastActive = Date.now());
 
 const lf = $("#login-form");
-let needNew = false;
 function loginMsg(t, err = true) { const m = $("#login-msg"); m.textContent = t; m.className = "hint" + (t && err ? " err" : ""); }
 function prepLogin() {
   const a = Auth.load(), email = normEmail(lf.email.value), role = Auth.roleOf(email, a);
-  needNew = !!role && !a.pw[email];
-  $("#pw2-wrap").hidden = !needNew;
-  $("#pw-label").textContent = needNew ? "Create a password (at least 8 characters)" : "Password";
-  lf.password.autocomplete = needNew ? "new-password" : "current-password";
-  $("#login-go").textContent = needNew ? "Create password & sign in" : "Sign in";
-  if (role) lf.loginRole.value = role;
+  const first = mode === "login" && role === ROLES[0] && !a.pw[email];
+  $("#rc-wrap").hidden = mode !== "recover";
+  $("#pw2-wrap").hidden = !(first || mode !== "login");
+  $("#login-role").hidden = mode !== "login";
+  lf.email.readOnly = mode !== "login";
+  $("#pw-label").textContent = mode === "recover" ? "New Coordinator password (at least 8 characters)"
+    : mode === "setnew" ? "Choose your own password (at least 8 characters)"
+    : first ? "Create the Coordinator password (at least 8 characters)" : "Password";
+  lf.password.autocomplete = mode === "login" && !first ? "current-password" : "new-password";
+  $("#login-go").textContent = mode === "recover" ? "Reset password & sign in" : mode === "setnew" ? "Save password & sign in" : first ? "Set up this device" : "Sign in";
+  $("#login-title").textContent = mode === "recover" ? "Reset Coordinator password" : mode === "setnew" ? "Choose your password" : first ? "Set up this device" : "Sign in";
+  $("#forgot").hidden = mode !== "login";
+  $("#login-back").hidden = mode === "login";
+  if (role && mode === "login") lf.loginRole.value = role;
+  $("#login-note").textContent =
+    mode === "recover" ? "Enter the recovery code you were given when this device was set up."
+    : first ? "First use on this device. The Coordinator sets the password that protects the records here, and receives a recovery code — keep it somewhere safe."
+    : mode === "login" && role && !a.pw[email] ? (a.pw[COORD_EMAIL]
+        ? "No password on this device yet. The Coordinator must sign in, open 👥 Users and give you a temporary password."
+        : "This device has not been set up yet. The Coordinator must sign in first.")
+    : "";
 }
+function setMode(m) { mode = m; lf.password.value = lf.password2.value = lf.rcode.value = ""; loginMsg(""); prepLogin(); }
 lf.email.addEventListener("input", prepLogin);
 $$('[name="loginRole"]', lf).forEach((el) => el.addEventListener("change", () => {
   if (lf.loginRole.value === ROLES[0]) lf.email.value = COORD_EMAIL;
   else if (normEmail(lf.email.value) === COORD_EMAIL) lf.email.value = "";
-  else if (!lf.email.value) { const list = Auth.load().users[lf.loginRole.value]; if (list.length === 1) lf.email.value = list[0]; }
+  if (!lf.email.value) { const list = Auth.load().users[lf.loginRole.value] || []; if (list.length === 1) lf.email.value = list[0]; }
   prepLogin(); (lf.email.value ? lf.password : lf.email).focus();
 }));
+$("#forgot").addEventListener("click", (e) => {
+  e.preventDefault();
+  if (Auth.roleOf(lf.email.value) !== ROLES[0])
+    return loginMsg("Ask the LFE Coordinator to give you a temporary password (👥 Users → Reset password).", false);
+  if (!Auth.load().recovery) return loginMsg("This device has no recovery code yet.");
+  setMode("recover");
+});
+$("#login-back").addEventListener("click", (e) => { e.preventDefault(); pending = null; setMode("login"); });
 
 lf.addEventListener("submit", async (e) => {
   e.preventDefault();
-  if (!window.crypto?.subtle) return loginMsg("This browser can't sign in securely here. Use the https website or a current Chrome / Edge / Safari.");
+  if (!window.crypto?.subtle) return loginMsg("This browser can't protect the records here. Use the https website, or a current Chrome / Edge / Safari.");
   const a = Auth.load(), email = normEmail(lf.email.value), role = Auth.roleOf(email, a), pw = lf.password.value;
-  if (!email || !pw) return loginMsg("Enter your email and password.");
-  if (!role) return loginMsg("This email is not allowed to sign in. Ask the LFE Coordinator to add it.");
-  if (role !== lf.loginRole.value) return loginMsg(`This email is registered as ${role}.`);
-  if (failures >= 5) return loginMsg("Too many wrong passwords. Wait 30 seconds and try again.");
-  $("#login-go").disabled = true;
+  const newPwOK = () => {
+    if (pw.length < 8) { loginMsg("Choose a password of at least 8 characters."); return false; }
+    if (pw !== lf.password2.value) { loginMsg("The two passwords don't match."); return false; }
+    return true;
+  };
+  if (failures >= 5) return loginMsg("Too many wrong attempts. Wait 30 seconds and try again.");
+  const fail = (t) => { if (++failures >= 5) setTimeout(() => (failures = 0), 30000); loginMsg(t); };
+  $("#login-go").disabled = true; loginMsg("Checking…", false);
   try {
-    if (!a.pw[email]) {
-      if (pw.length < 8) return loginMsg("Choose a password of at least 8 characters.");
-      if (pw !== lf.password2.value) return loginMsg("The two passwords don't match.");
-      a.pw[email] = await hashPw(pw); Auth.save(a);
-    } else {
-      const h = await hashPw(pw, a.pw[email].salt);
-      if (h.hash !== a.pw[email].hash) {
-        if (++failures >= 5) setTimeout(() => (failures = 0), 30000);
-        return loginMsg("Wrong password.");
-      }
+    if (mode === "setnew") {
+      if (!newPwOK()) return;
+      await Auth.setPassword(a, pending.email, pw, pending.dk); Auth.save(a);
+      const p = pending; pending = null; mode = "login";
+      return finish(p.email, p.role, p.dk);
     }
+    if (mode === "recover") {
+      if (!a.recovery) return loginMsg("This device has no recovery code.");
+      const k = await deriveKeys(normCode(lf.rcode.value), a.recovery.salt);
+      if (k.verify !== a.recovery.verify) return fail("That recovery code is not right.");
+      if (!newPwOK()) return;
+      const dk = await unwrapDK(a.recovery.wrap, k.key);
+      await Auth.setPassword(a, COORD_EMAIL, pw, dk); Auth.save(a);
+      mode = "login";
+      return finish(COORD_EMAIL, ROLES[0], dk);
+    }
+    if (!email || !pw) return loginMsg("Enter your email and password.");
+    if (!role) return loginMsg("This email is not allowed to sign in. Ask the LFE Coordinator to add it.");
+    if (role !== lf.loginRole.value) return loginMsg(`This email is registered as ${role}.`);
+    if (!a.pw[email]) {
+      if (role !== ROLES[0]) return prepLogin(), loginMsg($("#login-note").textContent);
+      // first Coordinator sign-in on this device: create the data key and a recovery code
+      if (!newPwOK()) return;
+      const dk = await newDataKey();
+      await Auth.setPassword(a, email, pw, dk);
+      const code = await Auth.newRecovery(a, dk);
+      Auth.save(a);
+      await finish(email, role, dk);
+      return showRecovery(code);
+    }
+    const k = await deriveKeys(pw, a.pw[email].salt);
+    if (k.verify !== a.pw[email].verify) return fail("Wrong password.");
+    const dk = await unwrapDK(a.pw[email].wrap, k.key);
     failures = 0;
-    signIn(email, role);
+    if (a.pw[email].temp) { pending = { email, role, dk }; setMode("setnew"); return loginMsg("Temporary password accepted. Now choose your own password.", false); }
+    await finish(email, role, dk);
+  } catch (err) {
+    loginMsg("Could not sign in: " + err.message);
   } finally { $("#login-go").disabled = false; }
 });
 
-function signIn(email, role) {
+async function finish(email, role, dk) {
   const prev = lastUser;
-  me = { email, role }; touch();
-  if (prev && prev.email !== email) { location.reload(); return; } // a different person: start clean
-  lf.reset(); prepLogin(); loginMsg("");
+  DK = dk; me = { email, role }; touch(); failures = 0;
+  if (prev && prev.email !== email) resetWorkspace(); // someone else was signed in before: start clean
+  lf.reset(); mode = "login"; prepLogin(); loginMsg("");
+  const moved = await DB.migrate();
   document.body.classList.remove("locked"); $("#login").hidden = true;
   $("#who-am-i").innerHTML = `Signed in: <b>${esc(OFFICERS[role])}</b> · ${esc(role)} · ${esc(email)}`;
-  $("#users-btn").hidden = !isCoord();
-  if (!started) { started = true; loadPrograms(); renderList(); setupApp(); }
+  $("#users-btn").hidden = $("#restore-btn").hidden = !isCoord();
+  if (!started) { started = true; loadPrograms(); setupApp(); }
+  if (!$("#view-record").hidden && current) openRecord(current.id); else await renderList();
+  if (moved) toast(`${moved} earlier record(s) are now encrypted`);
+}
+
+function resetWorkspace() {
+  editing = null; draft = null; audioBlob = null; followOf = null; current = null;
+  form.reset(); $("#audio-preview").innerHTML = "";
+  showView("list");
 }
 
 function lock(msg) {
   if (me) lastUser = me;
-  me = null; sessionStorage.removeItem(SESSION_KEY);
+  me = null; DK = null; DB.forget();
+  if (typeof rec !== "undefined" && rec && rec.state === "recording") stopRec(false);
+  // remove decrypted content from the page
+  $("#records").innerHTML = $("#record-body").innerHTML = $("#summary").innerHTML = $("#stats").innerHTML = "";
+  if (currentURL) { URL.revokeObjectURL(currentURL); currentURL = null; }
   document.body.classList.add("locked"); $("#login").hidden = false;
-  $("#users-sheet").hidden = $("#pw-sheet").hidden = true;
-  lf.reset();
-  if (lastUser) { lf.email.value = lastUser.email; }
-  else if (!lf.email.value) lf.email.value = COORD_EMAIL;
+  $$(".sheet").forEach((sh) => (sh.hidden = true));
+  lf.reset(); mode = "login"; pending = null;
+  lf.email.value = lastUser ? lastUser.email : COORD_EMAIL;
   prepLogin(); loginMsg(msg || "", false);
   (lf.email.value ? lf.password : lf.email).focus();
 }
-$("#logout-btn").addEventListener("click", () => { sessionStorage.removeItem(SESSION_KEY); location.reload(); });
+$("#logout-btn").addEventListener("click", () => { lastUser = null; resetWorkspace(); lock(); });
 
 // Sign out automatically after a while without activity (not while recording audio).
-["pointerdown", "keydown", "scroll"].forEach((ev) => addEventListener(ev, () => { if (me && Date.now() - lastActive > 5000) touch(); }, { passive: true }));
+["pointerdown", "keydown", "scroll"].forEach((ev) => addEventListener(ev, () => me && touch(), { passive: true }));
 setInterval(() => {
   if (!me) return;
   if (typeof rec !== "undefined" && rec && rec.state === "recording") return touch();
   if (Date.now() - lastActive > IDLE_MIN * 60000) lock(`Signed out after ${IDLE_MIN} minutes without activity. Sign in again to continue.`);
 }, 20000);
+
+/* ---- recovery code ---- */
+function showRecovery(code) {
+  $("#rc-code").textContent = code;
+  $("#rc-sheet").hidden = false;
+}
+$("#rc-ok").addEventListener("click", () => ($("#rc-sheet").hidden = true));
 
 /* ---- who may conduct: officers record their own meetings; the Coordinator may choose any ---- */
 function lockConductor(value) {
@@ -721,16 +909,20 @@ function lockConductor(value) {
 }
 
 /* ---- Users window (Coordinator only) ---- */
+const tempShown = {}; // temporary passwords just created, shown once
 function renderUsers() {
   const a = Auth.load();
+  const status = (e) => tempShown[e] ? `Temporary password: <code class="temp">${esc(tempShown[e])}</code> — give this to them`
+    : !a.pw[e] ? "No password on this device" : a.pw[e].temp ? "Temporary password (must change at sign-in)" : "Password set";
   $("#users-body").innerHTML = `
     <div class="urole"><h3>LFE Coordinator <small>(${esc(OFFICERS[ROLES[0]])})</small></h3>
-      <div class="urow"><span class="em">${esc(COORD_EMAIL)}</span><small>Fixed</small></div></div>` +
+      <div class="urow"><span class="em">${esc(COORD_EMAIL)}</span><small>Fixed</small>
+        <button class="btn ghost sm" data-recovery>New recovery code</button></div></div>` +
     ROLES.slice(1).map((r) => `<div class="urole" data-role="${esc(r)}">
       <h3>${esc(r)} <small>(${esc(OFFICERS[r])})</small></h3>
       ${a.users[r].length ? a.users[r].map((e) => `<div class="urow"><span class="em">${esc(e)}</span>
-          <small>${a.pw[e] ? "Password set" : "No password yet"}</small>
-          ${a.pw[e] ? `<button class="btn ghost sm" data-reset="${esc(e)}">Reset password</button>` : ""}
+          <small>${status(e)}</small>
+          <button class="btn ghost sm" data-temp="${esc(e)}">${a.pw[e] ? "Reset password" : "Give temporary password"}</button>
           <button class="btn ghost danger sm" data-remove="${esc(e)}">Remove</button></div>`).join("")
         : `<p class="hint warn">No email — nobody can sign in as ${esc(r)}.</p>`}
       <div class="uadd"><input type="email" placeholder="name@iub.edu.bd" aria-label="New email for ${esc(r)}">
@@ -743,19 +935,26 @@ function addUser(box) {
   if (used) { input.classList.add("invalid"); return toast(`Already used by ${used}`); }
   a.users[role].push(email); Auth.save(a); renderUsers(); toast(`Added ${email}`);
 }
-$("#users-body").addEventListener("click", (e) => {
-  if (!isCoord()) return;
+$("#users-body").addEventListener("click", async (e) => {
+  if (!isCoord() || !DK) return;
   const b = e.target.closest("button"); if (!b) return;
   const box = b.closest(".urole"), role = box?.dataset.role, a = Auth.load();
   if (b.dataset.add !== undefined) return addUser(box);
+  if (b.dataset.recovery !== undefined) {
+    if (!confirm("Create a new recovery code? The old code will stop working.")) return;
+    const code = await Auth.newRecovery(a, DK); Auth.save(a); return showRecovery(code);
+  }
   if (b.dataset.remove) {
     const em = b.dataset.remove;
     if (!confirm(`Remove ${em}? They will no longer be able to sign in on this device.`)) return;
-    a.users[role] = a.users[role].filter((x) => x !== em); delete a.pw[em]; Auth.save(a); renderUsers();
-  } else if (b.dataset.reset) {
-    const em = b.dataset.reset;
-    if (!confirm(`Reset the password for ${em}? They will choose a new one the next time they sign in.`)) return;
-    delete a.pw[em]; Auth.save(a); renderUsers(); toast("Password reset");
+    a.users[role] = a.users[role].filter((x) => x !== em); delete a.pw[em]; delete tempShown[em];
+    Auth.save(a); renderUsers();
+  } else if (b.dataset.temp) {
+    const em = b.dataset.temp;
+    if (a.pw[em] && !confirm(`Reset the password for ${em}? Their current password stops working.`)) return;
+    const tmp = randCode(4) + "-" + randCode(4);
+    await Auth.setPassword(a, em, tmp, DK, true); Auth.save(a);
+    tempShown[em] = tmp; renderUsers();
   }
 });
 $("#users-body").addEventListener("keydown", (e) => {
@@ -763,7 +962,7 @@ $("#users-body").addEventListener("keydown", (e) => {
 });
 $("#users-body").addEventListener("input", (e) => e.target.classList.remove("invalid"));
 $("#users-btn").addEventListener("click", () => { if (!isCoord()) return; renderUsers(); $("#users-sheet").hidden = false; });
-$("#users-close").addEventListener("click", () => ($("#users-sheet").hidden = true));
+$("#users-close").addEventListener("click", () => { for (const k in tempShown) delete tempShown[k]; $("#users-sheet").hidden = true; });
 
 /* ---- change own password ---- */
 const pf = $("#pw-form");
@@ -772,14 +971,90 @@ $("#pw-cancel").addEventListener("click", () => ($("#pw-sheet").hidden = true));
 pf.addEventListener("submit", async (e) => {
   e.preventDefault();
   const msg = (t) => { $("#pw-msg").textContent = t; $("#pw-msg").className = "hint err"; };
-  if (!me) return;
+  if (!me || !DK) return;
   const a = Auth.load(), cur = a.pw[me.email];
-  if (!cur || (await hashPw(pf.old.value, cur.salt)).hash !== cur.hash) return msg("Current password is wrong.");
+  if (!cur || (await deriveKeys(pf.old.value, cur.salt)).verify !== cur.verify) return msg("Current password is wrong.");
   if (pf.new1.value.length < 8) return msg("New password must be at least 8 characters.");
   if (pf.new1.value !== pf.new2.value) return msg("The new passwords don't match.");
-  a.pw[me.email] = await hashPw(pf.new1.value); Auth.save(a);
+  await Auth.setPassword(a, me.email, pf.new1.value, DK); Auth.save(a);
   $("#pw-sheet").hidden = true; toast("Password changed");
 });
 
+/* ================= backup & restore ================= */
+// A backup is one encrypted file with every record, its audio, and the list of staff emails.
+// It is locked with a backup password chosen when it is made. Restoring merges: newer versions win.
+const bf = $("#bk-form");
+let bkMode = "save", bkFile = null;
+function openBackup(m, file) {
+  bkMode = m; bkFile = file || null; bf.reset(); $("#bk-msg").textContent = "";
+  $("#bk-title").textContent = m === "save" ? "Back up all meetings" : `Restore from ${file.name}`;
+  $("#bk-intro").textContent = m === "save"
+    ? "Choose a password for this backup file. You need it to restore the file — on this or another device. Keep the file somewhere safe (e.g. IUB OneDrive / Google Drive)."
+    : "Enter the password that was chosen when this backup was made. Records are merged with the ones on this device; where both have the same meeting, the most recently edited version is kept.";
+  $("#bk2-wrap").hidden = m !== "save";
+  $("#bk-go").textContent = m === "save" ? "Create backup" : "Restore";
+  $("#bk-sheet").hidden = false; bf.bpw.focus();
+}
+$("#backup-btn").addEventListener("click", () => openBackup("save"));
+$("#restore-btn").addEventListener("click", () => $("#restore-file").click());
+$("#restore-file").addEventListener("change", (e) => { const f = e.target.files[0]; e.target.value = ""; if (f && isCoord()) openBackup("restore", f); });
+$("#bk-cancel").addEventListener("click", () => ($("#bk-sheet").hidden = true));
+bf.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const msg = (t, err = true) => { $("#bk-msg").textContent = t; $("#bk-msg").className = "hint" + (err ? " err" : ""); };
+  const pw = bf.bpw.value;
+  $("#bk-go").disabled = true;
+  try {
+    if (bkMode === "save") {
+      if (pw.length < 8) return msg("Choose a backup password of at least 8 characters.");
+      if (pw !== bf.bpw2.value) return msg("The two passwords don't match.");
+      msg("Preparing backup…", false);
+      const recs = await DB.all();
+      for (const r of recs) if (r.hasAudio) {
+        const b = await DB.audio(r.id);
+        if (b) r.audio = { type: b.type, data: toB64(await b.arrayBuffer()) };
+      }
+      const payload = { users: Auth.load().users, records: recs };
+      const k = await deriveKeys(pw), box = await seal(k.key, te.encode(JSON.stringify(payload)));
+      const file = { format: "lfe-meetings-backup", version: 1, created: new Date().toISOString(), by: me.email,
+        count: recs.length, salt: k.salt, iv: box.iv, data: toB64(box.ct) };
+      $("#bk-sheet").hidden = true;
+      await saveBlob(new Blob([JSON.stringify(file)], { type: "application/json" }), `LFE_Meetings_Backup_${todayISO()}.json`);
+      localStorage.setItem("lfe-last-backup", new Date().toISOString()); renderList();
+    } else {
+      if (!isCoord()) return;
+      let file;
+      try { file = JSON.parse(await bkFile.text()); } catch { return msg("This is not an LFE backup file."); }
+      if (file.format !== "lfe-meetings-backup") return msg("This is not an LFE backup file.");
+      msg("Opening backup…", false);
+      let payload;
+      try {
+        const k = await deriveKeys(pw, file.salt);
+        payload = JSON.parse(td.decode(await unseal(k.key, { iv: file.iv, ct: fromB64(file.data) })));
+      } catch { return msg("Wrong backup password, or the file is damaged."); }
+      const have = new Map((await DB.all()).map((r) => [r.id, r]));
+      const stamp = (r) => r.editedAt || r.createdAt || "";
+      let added = 0, updated = 0, same = 0;
+      for (const r of payload.records) {
+        const old = have.get(r.id);
+        if (old && stamp(old) >= stamp(r)) { same++; continue; }
+        const a = r.audio ? new Blob([fromB64(r.audio.data)], { type: r.audio.type }) : null;
+        delete r.audio;
+        await DB.put(r, a);
+        old ? updated++ : added++;
+      }
+      // bring over staff emails that this device doesn't have yet
+      const a = Auth.load(); let newUsers = 0;
+      for (const role of ROLES.slice(1)) for (const em of payload.users?.[role] || [])
+        if (!Auth.roleOf(em, a)) { a.users[role].push(em); newUsers++; }
+      Auth.save(a);
+      $("#bk-sheet").hidden = true; await renderList();
+      alert(`Restore complete.\n\n${added} new meeting(s) added\n${updated} updated with a newer version\n${same} already up to date` +
+        (newUsers ? `\n${newUsers} staff email(s) added — give them a temporary password in 👥 Users.` : ""));
+    }
+  } catch (err) { msg("Something went wrong: " + err.message); }
+  finally { $("#bk-go").disabled = false; }
+});
+
 /* ---- start ---- */
-{ const s = getSession(); if (s) signIn(s.email, s.role); else lock(); }
+lock();

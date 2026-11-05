@@ -34,20 +34,51 @@ Meeting Records opens with a sign-in window. Choose your role, then enter your e
 | LFE Program Officer | `t.islam@iub.edu.bd` |
 | LFE Jr. Program Officer | `arif.tanz@iub.edu.bd` |
 
-- **First sign-in on a device:** enter the email, then choose a password (at least 8 characters).
-- **The Coordinator** can open **👥 Users** to add or remove emails for the Program Officer and Jr. Program Officer, and to reset their passwords. The person then sets a new password the next time they sign in.
+**Setting up a device (Coordinator, once per device or browser)**
+1. Sign in as Coordinator and choose the password. This password protects the records on that device.
+2. You are shown a **recovery code** only once. Write it down and keep it safe and private.
+   If the Coordinator password is ever forgotten, the code is the only way back in. Use **Forgot password?** and enter the code.
+3. Open **👥 Users**. Click **Give temporary password** for each officer and tell them the code it shows.
+   At their first sign-in they replace it with their own password.
+
+**Coordinator only: 👥 Users**
+- Add or remove emails for the Program Officer and Jr. Program Officer.
+- Reset a password, which gives the person a new temporary password.
+- Make a new recovery code. The old code then stops working.
+
+**Other rules**
 - Program Officers can only record meetings under their own role. The Coordinator can pick any role.
-- Each record notes who entered it and who last edited it. Both appear in the Excel export.
-- You are signed out after 30 minutes without activity (but not while an audio recording is running), or when the browser or app is closed.
-- **Sign-in accounts are kept on each device and browser**, the same way the records are. Set up the users on every device you use.
-  The Coordinator should choose a password on each device straight away. A forgotten Coordinator password can't be reset from inside the app.
-- This sign-in keeps people at a shared computer out of the records. It is not server-grade security, because the records are still stored unencrypted in the browser.
+- Each record notes who entered it and who last edited it.
+- Staff are signed out after 30 minutes without activity (not while recording audio). They also need to sign in again after closing or reloading the page.
+
+## Records are encrypted
+
+Records and audio are stored encrypted (AES-256) in the browser. They can only be read after someone signs in.
+Records saved by the earlier unencrypted version are encrypted automatically the first time someone signs in.
+
+## Backup and restore
+
+- **⬇ Backup** (any signed-in staff member) saves one encrypted `.json` file. The file holds every meeting, its audio, and the list of staff emails.
+  You choose a backup password, and you need it to restore. Keep backups somewhere safe, such as IUB OneDrive or Google Drive.
+  The list page shows a reminder if no backup has been made in 7 days.
+- **⬆ Restore** (Coordinator only) merges a backup into this device. New meetings are added. Where both have the same meeting, the most recently edited version is kept.
+  Staff emails from the backup are added too. Give them temporary passwords on the new device.
+- To **move or combine records between devices**, make a backup on one device and restore it on the other.
+- Excel export is for reading and reporting. Use **Backup** to keep the records safe.
+
+## Other features
+
+- **Follow-ups:** a record's page has **✓ Mark follow-up done**. Starting a follow-up meeting from a record marks the earlier one done automatically.
+  The list shows follow-ups that are due and overdue.
+- **Reference numbers** are fixed when a record is first saved. They do not change if the date is edited later.
+- **Audio consent:** when audio is attached, the officer must tick that everyone present agreed to the recording.
+- **Bangla text in PDFs:** the built-in PDF maker can't draw Bangla. For records that contain Bangla, **Download PDF** opens the browser's print window instead. Choose **Save as PDF** there.
 
 ## Offline single-file version
 
 `LFE_Meeting_Records.html` is the whole Meeting Records app in one file. Download it and double-click
 to open in Chrome or Edge, with no internet needed. Records are saved in that browser on that computer, the same as the
-online version. **Records entered in the offline file and on the website are kept separately** — pick one and stick to it.
+online version, and it needs its own Coordinator setup. **Records entered in the offline file and on the website are kept separately** — pick one and stick to it.
 
 To rebuild it after changes: `python3 tools/build_standalone.py`
 

@@ -1,6 +1,6 @@
 // LFE Meeting Records — offline support.
 // Bump VERSION whenever app files change so installed apps pick up the update.
-const VERSION = "lfe-meetings-v2";
+const VERSION = "lfe-meetings-v3";
 const FILES = [
   "./meetings.html", "./style.css", "./meetings.css", "./meetings.js",
   "./vendor/jspdf.umd.min.js", "./vendor/xlsx.full.min.js",
@@ -31,6 +31,8 @@ self.addEventListener("fetch", (e) => {
         if (res.ok) { const copy = res.clone(); caches.open(VERSION).then((c) => c.put(req, copy)); }
         return res;
       })
-      .catch(() => caches.match(req, { ignoreSearch: true }).then((r) => r || caches.match("./meetings.html")))
+      .catch(() => caches.match(req, { ignoreSearch: true }).then((r) =>
+        // only page loads fall back to the app page; a missing data file fails normally
+        r || (req.mode === "navigate" ? caches.match("./meetings.html") : Response.error())))
   );
 });
