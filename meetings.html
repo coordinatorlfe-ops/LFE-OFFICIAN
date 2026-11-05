@@ -16,7 +16,7 @@
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="meetings.css">
 </head>
-<body>
+<body class="locked">
   <header class="top">
     <div class="wrap top-inner">
       <div class="brand">
@@ -32,7 +32,59 @@
         <button data-view="new" aria-selected="false">+ New meeting</button>
       </nav>
     </div>
+    <div class="wrap userbar" id="userbar">
+      <span id="who-am-i"></span>
+      <span class="spacer"></span>
+      <button class="linkbtn" id="users-btn" hidden>👥 Users</button>
+      <button class="linkbtn" id="mypw-btn">Change password</button>
+      <button class="linkbtn" id="logout-btn">Sign out</button>
+    </div>
   </header>
+
+  <!-- ============ SIGN IN ============ -->
+  <div id="login" class="login">
+    <form class="login-card" id="login-form" novalidate>
+      <div class="brand login-brand"><span class="mark">LFE</span>
+        <div><div class="brand-title">Meeting Records</div><div class="brand-sub">LFE Office · Staff sign in</div></div>
+      </div>
+      <h1 id="login-title">Sign in</h1>
+      <div class="choice-grid login-roles" id="login-role">
+        <label class="choice"><input type="radio" name="loginRole" value="LFE Coordinator" checked><span><b>Coordinator</b></span></label>
+        <label class="choice"><input type="radio" name="loginRole" value="LFE Program Officer"><span><b>LFE Program Officer</b></span></label>
+        <label class="choice"><input type="radio" name="loginRole" value="LFE Jr. Program Officer"><span><b>Jr. Program Officer</b></span></label>
+      </div>
+      <label class="field" id="rc-wrap" hidden><span>Recovery code</span><input name="rcode" autocomplete="off" autocapitalize="characters" placeholder="XXXXX-XXXXX-XXXXX-XXXXX"></label>
+      <label class="field"><span>IUB email</span><input name="email" type="email" autocomplete="username" required></label>
+      <label class="field"><span id="pw-label">Password</span><input name="password" type="password" autocomplete="current-password" required></label>
+      <label class="field" id="pw2-wrap" hidden><span>Confirm new password</span><input name="password2" type="password" autocomplete="new-password"></label>
+      <p class="hint warn" id="login-note"></p>
+      <div class="hint" id="login-msg"></div>
+      <button class="btn login-go" type="submit" id="login-go">Sign in</button>
+      <p class="hint small login-links"><a href="#" id="forgot">Forgot password?</a><a href="#" id="login-back" hidden>← Back to sign in</a></p>
+    </form>
+  </div>
+
+  <!-- ============ USERS (Coordinator only) ============ -->
+  <div id="users-sheet" class="sheet center" hidden>
+    <div class="sheet-card wide">
+      <h2>Users &amp; emails</h2>
+      <p class="hint warn" id="users-intro"></p>
+      <div id="users-body"></div>
+      <div class="wizard-nav"><span class="spacer"></span><button class="btn" id="users-close">Done</button></div>
+    </div>
+  </div>
+
+  <!-- ============ CHANGE PASSWORD ============ -->
+  <div id="pw-sheet" class="sheet center" hidden>
+    <form class="sheet-card" id="pw-form" novalidate>
+      <h2>Change password</h2>
+      <label class="field"><span>Current password</span><input name="old" type="password" autocomplete="current-password"></label>
+      <label class="field"><span>New password (at least 8 characters)</span><input name="new1" type="password" autocomplete="new-password"></label>
+      <label class="field"><span>Confirm new password</span><input name="new2" type="password" autocomplete="new-password"></label>
+      <div class="hint" id="pw-msg"></div>
+      <div class="wizard-nav"><button class="btn ghost" type="button" id="pw-cancel">Cancel</button><span class="spacer"></span><button class="btn" type="submit">Save password</button></div>
+    </form>
+  </div>
 
   <main class="wrap">
     <!-- ============ LIST ============ -->
@@ -40,10 +92,15 @@
       <div class="list-head">
         <div>
           <h1>Meetings</h1>
-          <p class="lede">Records are saved on this device only. Back up with Export to Excel.</p>
+          <p class="lede">Records are encrypted and saved on this device only. Make a ⬇ Backup regularly.</p>
         </div>
         <div class="actions">
           <button class="btn ghost" id="install-btn" hidden>⬇ Install app</button>
+          <button class="btn ghost" id="drive-btn" hidden>☁ Google Drive</button>
+          <button class="btn ghost" id="drive-restore-btn" hidden>☁ Restore from Drive</button>
+          <button class="btn ghost" id="backup-btn">⬇ Backup</button>
+          <button class="btn ghost" id="restore-btn" hidden>⬆ Restore</button>
+          <input type="file" id="restore-file" accept=".json,application/json" hidden>
           <button class="btn ghost" id="export-xlsx">Export all to Excel</button>
           <button class="btn" data-go="new">+ New meeting</button>
         </div>
@@ -58,6 +115,7 @@
           <option value="D">D · Monitor / SoD</option>
         </select>
       </div>
+      <div id="backup-note" class="hint warn" hidden></div>
       <div id="stats" class="stats"></div>
       <div id="records"></div>
     </section>
@@ -230,6 +288,8 @@
               <label class="btn ghost file-btn">Upload audio file<input type="file" id="audio-file" accept="audio/*" hidden></label>
             </div>
             <div id="audio-preview"></div>
+            <label class="consent"><input type="checkbox" name="audioConsent" value="yes" id="consent-cb">
+              Everyone present was told about the recording and agreed to it (required when audio is attached)</label>
           </fieldset>
         </div>
 
@@ -286,6 +346,7 @@
         <button class="btn danger ghost" id="rec-delete">Delete</button>
         <span class="spacer"></span>
         <button class="btn ghost" id="rec-edit">Edit</button>
+        <button class="btn ghost" id="rec-done" hidden>✓ Mark follow-up done</button>
         <button class="btn ghost" id="rec-followup">Start follow-up meeting</button>
         <button class="btn" id="rec-pdf">Download PDF</button>
       </div>
@@ -304,6 +365,40 @@
       <button class="btn" id="ios-help-close">OK</button>
     </div>
   </div>
+  <!-- ============ RECOVERY CODE ============ -->
+  <div id="rc-sheet" class="sheet center top-sheet" hidden>
+    <div class="sheet-card">
+      <h2>Coordinator recovery code</h2>
+      <p>If the Coordinator password is forgotten, this code is the <b>only</b> way to open the records on this device. Write it down and keep it somewhere safe and private.</p>
+      <p class="rc-code" id="rc-code"></p>
+      <p class="hint">It is shown only now. You can make a new one later in 👥 Users.</p>
+      <div class="wizard-nav"><span class="spacer"></span><button class="btn" id="rc-ok">I have written it down</button></div>
+    </div>
+  </div>
+
+  <!-- ============ BACKUP / RESTORE ============ -->
+  <div id="bk-sheet" class="sheet center" hidden>
+    <form class="sheet-card" id="bk-form" novalidate>
+      <h2 id="bk-title">Backup</h2>
+      <p class="hint" id="bk-intro"></p>
+      <label class="field"><span>Backup password</span><input name="bpw" type="password" autocomplete="off"></label>
+      <label class="field" id="bk2-wrap"><span>Confirm backup password</span><input name="bpw2" type="password" autocomplete="off"></label>
+      <div class="hint" id="bk-msg"></div>
+      <div class="wizard-nav"><button class="btn ghost" type="button" id="bk-cancel">Cancel</button><span class="spacer"></span><button class="btn" type="submit" id="bk-go">Create backup</button></div>
+    </form>
+  </div>
+
+  <!-- ============ RESTORE FROM GOOGLE DRIVE ============ -->
+  <div id="drive-sheet" class="sheet center" hidden>
+    <div class="sheet-card wide">
+      <h2>Restore from Google Drive</h2>
+      <p class="hint">Backups in the “LFE Meeting Backups” folder of your Google Drive, newest first. Choose one.</p>
+      <div id="drive-list"></div>
+      <div class="wizard-nav"><span class="spacer"></span><button class="btn ghost" id="drive-close">Cancel</button></div>
+    </div>
+  </div>
+
+  <div id="print-area"></div>
   <div id="toast" class="toast" hidden></div>
 
   <script src="vendor/jspdf.umd.min.js"></script>
