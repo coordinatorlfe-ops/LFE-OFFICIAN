@@ -7,6 +7,8 @@ def js(f): return open(root+f,encoding='utf-8',errors='strict').read().replace('
 progs=json.load(open(root+'data/iub-programs.json'))
 html=html.replace('<link rel="stylesheet" href="style.css">\n  <link rel="stylesheet" href="meetings.css">', '<style>\n'+css+'\n</style>')
 html=html.replace('<a class="tablink" href="index.html">← LFE home</a>','<a class="tablink" href="https://coordinatorlfe-ops.github.io/LFE-OFFICIAN/" target="_blank" rel="noopener">LFE site ↗</a>')
+import re as _re
+html=_re.sub(r'\s*<link rel="(manifest|icon|apple-touch-icon)"[^>]*>','',html)
 html=html.replace('<script src="vendor/jspdf.umd.min.js"></script>','<script>\n'+js('vendor/jspdf.umd.min.js')+'\n</script>')
 html=html.replace('<script src="vendor/xlsx.full.min.js"></script>','<script>\n'+js('vendor/xlsx.full.min.js')+'\n</script>')
 html=html.replace('<script src="meetings.js"></script>','<script>window.IUB_PROGRAMS = '+json.dumps(progs)+';</script>\n<script>\n'+js('meetings.js')+'\n</script>')

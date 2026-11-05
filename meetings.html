@@ -2,8 +2,16 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#1f5f4a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="LFE Meetings">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <title>LFE Meetings · Staff</title>
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="meetings.css">
@@ -32,9 +40,10 @@
       <div class="list-head">
         <div>
           <h1>Meetings</h1>
-          <p class="lede">Records are saved on this computer's browser only.</p>
+          <p class="lede">Records are saved on this device only. Back up with Export to Excel.</p>
         </div>
         <div class="actions">
+          <button class="btn ghost" id="install-btn" hidden>⬇ Install app</button>
           <button class="btn ghost" id="export-xlsx">Export all to Excel</button>
           <button class="btn" data-go="new">+ New meeting</button>
         </div>
@@ -282,6 +291,20 @@
       </div>
     </section>
   </main>
+
+  <div id="ios-help" class="sheet" hidden>
+    <div class="sheet-card">
+      <h2>Install on iPhone / iPad</h2>
+      <ol>
+        <li>Open this page in <b>Safari</b>.</li>
+        <li>Tap the <b>Share</b> button (square with an arrow).</li>
+        <li>Scroll down and tap <b>Add to Home Screen</b>, then <b>Add</b>.</li>
+      </ol>
+      <p class="hint">The app then opens from its LFE icon, full screen, and works offline.</p>
+      <button class="btn" id="ios-help-close">OK</button>
+    </div>
+  </div>
+  <div id="toast" class="toast" hidden></div>
 
   <script src="vendor/jspdf.umd.min.js"></script>
   <script src="vendor/xlsx.full.min.js"></script>

@@ -165,6 +165,55 @@ function summaryHTML(r, audioURL) {
   </div>`;
 }
 
+/* ================= app shell: install, offline, saving files ================= */
+const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const isStandalone = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+
+function toast(msg) {
+  const t = $("#toast"); if (!t) return;
+  t.textContent = msg; t.hidden = false;
+  clearTimeout(toast._t); toast._t = setTimeout(() => (t.hidden = true), 2600);
+}
+
+// Save a file. On an installed iPhone app, downloads don't work, so use the Share sheet ("Save to Files").
+async function saveBlob(blob, name) {
+  const file = new File([blob], name, { type: blob.type });
+  if (isIOS && navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: name }); return; }
+    catch (e) { if (e.name === "AbortError") return; }
+  }
+  const url = URL.createObjectURL(blob);
+  const a = Object.assign(document.createElement("a"), { href: url, download: name });
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+  toast(`Saved ${name}`);
+}
+
+function setupApp() {
+  // Offline support (only when served from a website, not when opened as a file).
+  if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
+    navigator.serviceWorker.register("sw.js").catch(() => {});
+  }
+  // Ask the browser not to clear our records when the device is low on space.
+  if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+
+  // Install button
+  const btn = $("#install-btn");
+  let deferred = null;
+  window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); deferred = e; btn.hidden = false; });
+  window.addEventListener("appinstalled", () => { btn.hidden = true; toast("LFE Meetings installed"); });
+  if (isIOS && !isStandalone() && location.protocol.startsWith("http")) btn.hidden = false;
+  btn.addEventListener("click", async () => {
+    if (deferred) { deferred.prompt(); await deferred.userChoice; deferred = null; btn.hidden = true; }
+    else if (isIOS) $("#ios-help").hidden = false;
+  });
+  $("#ios-help-close").addEventListener("click", () => ($("#ios-help").hidden = true));
+  if (isStandalone()) document.documentElement.classList.add("standalone");
+
+  // App shortcut: open straight to a new meeting
+  if (location.hash === "#new") startNew();
+}
+
 /* ================= PDF ================= */
 function makePDF(r) {
   const { jsPDF } = window.jspdf;
@@ -223,7 +272,7 @@ function makePDF(r) {
     doc.text(`Generated ${new Date().toLocaleString("en-GB")} · Page ${i} of ${pages}`, W / 2, H - 25, { align: "center" });
   }
   const who = (r.category === "C" ? r.c_title : r.s_id || r.s_name).replace(/[^\w-]+/g, "_");
-  doc.save(`LFE_Meeting_${r.date}_${who}.pdf`);
+  saveBlob(doc.output("blob"), `LFE_Meeting_${r.date}_${who}.pdf`);
 }
 
 /* ================= Excel ================= */
@@ -260,7 +309,8 @@ async function exportExcel() {
     const sub = rows.filter((r) => r.Category.startsWith(c));
     if (sub.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sub), `Category ${c}`);
   }
-  XLSX.writeFile(wb, `LFE_Meetings_${todayISO()}.xlsx`);
+  const out = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+  saveBlob(new Blob([out], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), `LFE_Meetings_${todayISO()}.xlsx`);
 }
 
 /* ================= views ================= */
@@ -444,6 +494,7 @@ $("#save").addEventListener("click", async () => {
   const rec = { ...draft, audio: audioBlob || null, createdAt: draft.createdAt || new Date().toISOString() };
   await DB.put(rec);
   const wasEdit = editing; editing = null;
+  toast(wasEdit ? "Changes saved" : "Meeting saved");
   if (wasEdit) openRecord(rec.id); else { showView("list"); await renderList(); }
 });
 $("#pdf-btn").addEventListener("click", () => makePDF(draft));
@@ -526,4 +577,4 @@ $("#rec-btn").addEventListener("click", async () => {
 $("#audio-file").addEventListener("change", (e) => { const f = e.target.files[0]; if (f) showAudio(f, f.name); e.target.value = ""; });
 
 /* ---- start ---- */
-loadPrograms(); renderList();
+loadPrograms(); renderList(); setupApp();

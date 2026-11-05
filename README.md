@@ -31,3 +31,16 @@ to open in Chrome or Edge, with no internet needed. Records are saved in that br
 online version. **Records entered in the offline file and on the website are kept separately** — pick one and stick to it.
 
 To rebuild it after changes: `python3 tools/build_standalone.py`
+
+## Install as an app (Windows, Android, iPhone)
+
+Meeting Records is an installable web app. Open
+https://coordinatorlfe-ops.github.io/LFE-OFFICIAN/meetings.html and:
+
+- **Windows (Chrome or Edge):** click **⬇ Install app** on the page (or the install icon in the address bar). It appears in the Start menu and opens in its own window.
+- **Android (Chrome):** tap **⬇ Install app**, or menu ⋮ → **Install app** / **Add to Home screen**.
+- **iPhone / iPad (Safari):** Share → **Add to Home Screen**.
+
+Once installed it works offline. Each device keeps its own records; back up with **Export all to Excel**.
+
+When app files change, bump `VERSION` in `sw.js` so installed apps update.
