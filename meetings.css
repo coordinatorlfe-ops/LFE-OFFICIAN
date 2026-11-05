@@ -168,3 +168,36 @@ h2 { font-size: 1.1rem; margin: 22px 0 10px; }
   .rtable th, .rtable td { padding: 9px 8px; }
 }
 html.standalone body { overscroll-behavior-y: none; }
+
+/* ===== sign in & users ===== */
+body.locked main, body.locked .tabs, body.locked .userbar { display: none !important; }
+.login { position: fixed; inset: 0; z-index: 70; background: var(--bg); display: grid; place-items: center; padding: 16px; overflow: auto; }
+.login-card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 26px 28px; width: 100%; max-width: 560px; box-shadow: 0 10px 30px rgba(0,0,0,.08); }
+.login-card h1 { font-size: 1.3rem; margin: 18px 0 12px; }
+.login-brand { background: var(--accent); color: #fff; margin: -26px -28px 0; padding: 16px 28px; border-radius: 16px 16px 0 0; display: flex; gap: 12px; align-items: center; }
+.login-roles { margin-bottom: 8px; }
+.login-roles .choice span { padding: 10px 12px; text-align: center; }
+.login-go { width: 100%; justify-content: center; margin-top: 8px; padding: 12px; }
+.hint.err { color: #b3261e; }
+.hint.small { font-size: .8rem; margin-top: 14px; }
+.userbar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: .85rem; padding-top: 6px; padding-bottom: 6px; color: #fff; }
+.userbar b { font-weight: 650; }
+.linkbtn { font: inherit; background: rgba(255,255,255,.12); color: #fff; border: 0; border-radius: 6px; padding: 5px 10px; cursor: pointer; }
+.linkbtn:hover { background: rgba(255,255,255,.22); }
+.sheet.center { place-items: center; }
+.sheet-card.wide { max-width: 620px; max-height: 90vh; overflow: auto; }
+.urole { border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; margin: 12px 0; }
+.urole h3 { margin: 0 0 8px; font-size: .95rem; color: var(--accent); }
+.urow { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.urow:last-of-type { border-bottom: 0; }
+.urow .em { flex: 1 1 200px; word-break: break-all; }
+.urow small { color: var(--muted); }
+.btn.sm { padding: 5px 10px; font-size: .85rem; }
+.uadd { display: flex; gap: 8px; margin-top: 8px; }
+.uadd input { flex: 1; font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; }
+.choice input:disabled + span { opacity: .45; cursor: not-allowed; }
+@media (max-width: 700px) {
+  .login-roles { grid-template-columns: 1fr; }
+  .login-card { padding: 22px 18px; }
+  .login-brand { margin: -22px -18px 0; padding: 14px 18px; }
+}

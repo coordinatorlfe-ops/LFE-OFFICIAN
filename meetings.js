@@ -297,6 +297,7 @@ async function exportExcel() {
     "Disciplinary issues": (r.outcomes || []).includes("Disciplinary issues") ? "Yes" : "",
     "Proctorial issues": (r.outcomes || []).includes("Proctorial issues") ? "Yes" : "",
     "Outcome note": r.outcomeNote || "",
+    "Recorded by": r.recordedBy || "", "Last edited by": r.editedBy || "",
     "Last edited": r.editedAt ? new Date(r.editedAt).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" }) : "",
     "Summary": narrative(r),
   }));
@@ -457,6 +458,8 @@ function collect() {
   if (c !== "B") { r.reasons = []; delete r.reasonOther; }
   if (c !== "C") { delete r.c_title; delete r.c_participants; }
   if (editing) { r.createdAt = editing.createdAt; r.editedAt = new Date().toISOString(); }
+  r.recordedBy = editing?.recordedBy || draft?.recordedBy || me?.email || "";
+  if (editing) r.editedBy = me?.email || "";
   r.id = editing?.id || draft?.id || crypto.randomUUID?.() || String(Date.now()) + Math.random().toString(16).slice(2);
   r.hasAudio = !!audioBlob;
   r.priorCount = priorCount;
@@ -507,6 +510,7 @@ function startNew(from) {
   $("#audio-preview").innerHTML = ""; $("#history-hint").hidden = true;
   $("#reason-other").hidden = $("#ref-other").hidden = true;
   form.date.value = todayISO(); form.time.value = nowHM();
+  lockConductor(me?.role);
   if (from) {
     form.category.value = from.category;
     for (const k of ["s_name", "s_id", "s_major", "s_school", "s_phone", "s_advisor", "g_name", "g_relation", "g_phone"]) if (from[k] && form[k]) setSelect(form[k], from[k]);
@@ -526,6 +530,7 @@ function startEdit(r) {
     else if (el.type === "radio") el.checked = v === el.value;
     else if (v !== undefined) setSelect(el, v);
   }
+  lockConductor(r.conductedBy);
   priorCount = r.priorCount || 0;
   $("#reason-other").hidden = !(r.reasons || []).includes("Other");
   $("#ref-other").hidden = !(r.referrals || []).includes("Other");
@@ -576,5 +581,205 @@ $("#rec-btn").addEventListener("click", async () => {
 });
 $("#audio-file").addEventListener("change", (e) => { const f = e.target.files[0]; if (f) showAudio(f, f.name); e.target.value = ""; });
 
+/* ================= sign in ================= */
+// Accounts are kept on this device (localStorage). Passwords are stored only as salted PBKDF2 hashes.
+const COORD_EMAIL = "coordinator.lfe@iub.edu.bd"; // fixed — cannot be removed or changed
+const ROLES = ["LFE Coordinator", "LFE Program Officer", "LFE Jr. Program Officer"];
+const DEFAULT_USERS = {
+  "LFE Program Officer": ["t.islam@iub.edu.bd"],
+  "LFE Jr. Program Officer": ["arif.tanz@iub.edu.bd"],
+};
+const AUTH_KEY = "lfe-auth-v1", SESSION_KEY = "lfe-session", IDLE_MIN = 30;
+const normEmail = (e) => String(e || "").trim().toLowerCase();
+const isEmail = (e) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e);
+
+const Auth = {
+  load() {
+    let a = null;
+    try { a = JSON.parse(localStorage.getItem(AUTH_KEY)); } catch {}
+    a = a || {};
+    a.users = a.users || JSON.parse(JSON.stringify(DEFAULT_USERS));
+    a.pw = a.pw || {};
+    for (const r of ROLES.slice(1)) a.users[r] = a.users[r] || [];
+    return a;
+  },
+  save(a) { localStorage.setItem(AUTH_KEY, JSON.stringify(a)); },
+  roleOf(email, a = this.load()) {
+    email = normEmail(email);
+    if (email === COORD_EMAIL) return ROLES[0];
+    return ROLES.slice(1).find((r) => a.users[r].includes(email)) || null;
+  },
+};
+
+const b64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
+async function hashPw(pw, saltB64) {
+  const salt = saltB64 ? Uint8Array.from(atob(saltB64), (c) => c.charCodeAt(0)) : crypto.getRandomValues(new Uint8Array(16));
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(pw), "PBKDF2", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", salt, iterations: 200000, hash: "SHA-256" }, key, 256);
+  return { salt: b64(salt), hash: b64(bits) };
+}
+
+let me = null, lastUser = null, started = false, lastActive = Date.now(), failures = 0;
+const isCoord = () => me?.role === ROLES[0];
+
+function getSession() {
+  try {
+    const s = JSON.parse(sessionStorage.getItem(SESSION_KEY));
+    if (s && Date.now() - s.t < IDLE_MIN * 60000 && Auth.roleOf(s.email) === s.role) return s;
+  } catch {}
+  return null;
+}
+function touch() {
+  lastActive = Date.now();
+  if (me) sessionStorage.setItem(SESSION_KEY, JSON.stringify({ email: me.email, role: me.role, t: lastActive }));
+}
+
+const lf = $("#login-form");
+let needNew = false;
+function loginMsg(t, err = true) { const m = $("#login-msg"); m.textContent = t; m.className = "hint" + (t && err ? " err" : ""); }
+function prepLogin() {
+  const a = Auth.load(), email = normEmail(lf.email.value), role = Auth.roleOf(email, a);
+  needNew = !!role && !a.pw[email];
+  $("#pw2-wrap").hidden = !needNew;
+  $("#pw-label").textContent = needNew ? "Create a password (at least 8 characters)" : "Password";
+  lf.password.autocomplete = needNew ? "new-password" : "current-password";
+  $("#login-go").textContent = needNew ? "Create password & sign in" : "Sign in";
+  if (role) lf.loginRole.value = role;
+}
+lf.email.addEventListener("input", prepLogin);
+$$('[name="loginRole"]', lf).forEach((el) => el.addEventListener("change", () => {
+  if (lf.loginRole.value === ROLES[0]) lf.email.value = COORD_EMAIL;
+  else if (normEmail(lf.email.value) === COORD_EMAIL) lf.email.value = "";
+  else if (!lf.email.value) { const list = Auth.load().users[lf.loginRole.value]; if (list.length === 1) lf.email.value = list[0]; }
+  prepLogin(); (lf.email.value ? lf.password : lf.email).focus();
+}));
+
+lf.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!window.crypto?.subtle) return loginMsg("This browser can't sign in securely here. Use the https website or a current Chrome / Edge / Safari.");
+  const a = Auth.load(), email = normEmail(lf.email.value), role = Auth.roleOf(email, a), pw = lf.password.value;
+  if (!email || !pw) return loginMsg("Enter your email and password.");
+  if (!role) return loginMsg("This email is not allowed to sign in. Ask the LFE Coordinator to add it.");
+  if (role !== lf.loginRole.value) return loginMsg(`This email is registered as ${role}.`);
+  if (failures >= 5) return loginMsg("Too many wrong passwords. Wait 30 seconds and try again.");
+  $("#login-go").disabled = true;
+  try {
+    if (!a.pw[email]) {
+      if (pw.length < 8) return loginMsg("Choose a password of at least 8 characters.");
+      if (pw !== lf.password2.value) return loginMsg("The two passwords don't match.");
+      a.pw[email] = await hashPw(pw); Auth.save(a);
+    } else {
+      const h = await hashPw(pw, a.pw[email].salt);
+      if (h.hash !== a.pw[email].hash) {
+        if (++failures >= 5) setTimeout(() => (failures = 0), 30000);
+        return loginMsg("Wrong password.");
+      }
+    }
+    failures = 0;
+    signIn(email, role);
+  } finally { $("#login-go").disabled = false; }
+});
+
+function signIn(email, role) {
+  const prev = lastUser;
+  me = { email, role }; touch();
+  if (prev && prev.email !== email) { location.reload(); return; } // a different person: start clean
+  lf.reset(); prepLogin(); loginMsg("");
+  document.body.classList.remove("locked"); $("#login").hidden = true;
+  $("#who-am-i").innerHTML = `Signed in: <b>${esc(OFFICERS[role])}</b> · ${esc(role)} · ${esc(email)}`;
+  $("#users-btn").hidden = !isCoord();
+  if (!started) { started = true; loadPrograms(); renderList(); setupApp(); }
+}
+
+function lock(msg) {
+  if (me) lastUser = me;
+  me = null; sessionStorage.removeItem(SESSION_KEY);
+  document.body.classList.add("locked"); $("#login").hidden = false;
+  $("#users-sheet").hidden = $("#pw-sheet").hidden = true;
+  lf.reset();
+  if (lastUser) { lf.email.value = lastUser.email; }
+  else if (!lf.email.value) lf.email.value = COORD_EMAIL;
+  prepLogin(); loginMsg(msg || "", false);
+  (lf.email.value ? lf.password : lf.email).focus();
+}
+$("#logout-btn").addEventListener("click", () => { sessionStorage.removeItem(SESSION_KEY); location.reload(); });
+
+// Sign out automatically after a while without activity (not while recording audio).
+["pointerdown", "keydown", "scroll"].forEach((ev) => addEventListener(ev, () => { if (me && Date.now() - lastActive > 5000) touch(); }, { passive: true }));
+setInterval(() => {
+  if (!me) return;
+  if (typeof rec !== "undefined" && rec && rec.state === "recording") return touch();
+  if (Date.now() - lastActive > IDLE_MIN * 60000) lock(`Signed out after ${IDLE_MIN} minutes without activity. Sign in again to continue.`);
+}, 20000);
+
+/* ---- who may conduct: officers record their own meetings; the Coordinator may choose any ---- */
+function lockConductor(value) {
+  $$('[name="conductedBy"]', form).forEach((el) => {
+    el.disabled = !isCoord() && el.value !== value;
+    el.checked = el.value === value;
+  });
+}
+
+/* ---- Users window (Coordinator only) ---- */
+function renderUsers() {
+  const a = Auth.load();
+  $("#users-body").innerHTML = `
+    <div class="urole"><h3>LFE Coordinator <small>(${esc(OFFICERS[ROLES[0]])})</small></h3>
+      <div class="urow"><span class="em">${esc(COORD_EMAIL)}</span><small>Fixed</small></div></div>` +
+    ROLES.slice(1).map((r) => `<div class="urole" data-role="${esc(r)}">
+      <h3>${esc(r)} <small>(${esc(OFFICERS[r])})</small></h3>
+      ${a.users[r].length ? a.users[r].map((e) => `<div class="urow"><span class="em">${esc(e)}</span>
+          <small>${a.pw[e] ? "Password set" : "No password yet"}</small>
+          ${a.pw[e] ? `<button class="btn ghost sm" data-reset="${esc(e)}">Reset password</button>` : ""}
+          <button class="btn ghost danger sm" data-remove="${esc(e)}">Remove</button></div>`).join("")
+        : `<p class="hint warn">No email — nobody can sign in as ${esc(r)}.</p>`}
+      <div class="uadd"><input type="email" placeholder="name@iub.edu.bd" aria-label="New email for ${esc(r)}">
+        <button class="btn sm" data-add>Add</button></div></div>`).join("");
+}
+function addUser(box) {
+  const input = $("input", box), email = normEmail(input.value), role = box.dataset.role;
+  if (!isEmail(email)) { input.classList.add("invalid"); return toast("Enter a valid email address"); }
+  const a = Auth.load(), used = Auth.roleOf(email, a);
+  if (used) { input.classList.add("invalid"); return toast(`Already used by ${used}`); }
+  a.users[role].push(email); Auth.save(a); renderUsers(); toast(`Added ${email}`);
+}
+$("#users-body").addEventListener("click", (e) => {
+  if (!isCoord()) return;
+  const b = e.target.closest("button"); if (!b) return;
+  const box = b.closest(".urole"), role = box?.dataset.role, a = Auth.load();
+  if (b.dataset.add !== undefined) return addUser(box);
+  if (b.dataset.remove) {
+    const em = b.dataset.remove;
+    if (!confirm(`Remove ${em}? They will no longer be able to sign in on this device.`)) return;
+    a.users[role] = a.users[role].filter((x) => x !== em); delete a.pw[em]; Auth.save(a); renderUsers();
+  } else if (b.dataset.reset) {
+    const em = b.dataset.reset;
+    if (!confirm(`Reset the password for ${em}? They will choose a new one the next time they sign in.`)) return;
+    delete a.pw[em]; Auth.save(a); renderUsers(); toast("Password reset");
+  }
+});
+$("#users-body").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && e.target.matches(".uadd input")) { e.preventDefault(); if (isCoord()) addUser(e.target.closest(".urole")); }
+});
+$("#users-body").addEventListener("input", (e) => e.target.classList.remove("invalid"));
+$("#users-btn").addEventListener("click", () => { if (!isCoord()) return; renderUsers(); $("#users-sheet").hidden = false; });
+$("#users-close").addEventListener("click", () => ($("#users-sheet").hidden = true));
+
+/* ---- change own password ---- */
+const pf = $("#pw-form");
+$("#mypw-btn").addEventListener("click", () => { pf.reset(); $("#pw-msg").textContent = ""; $("#pw-sheet").hidden = false; pf.old.focus(); });
+$("#pw-cancel").addEventListener("click", () => ($("#pw-sheet").hidden = true));
+pf.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const msg = (t) => { $("#pw-msg").textContent = t; $("#pw-msg").className = "hint err"; };
+  if (!me) return;
+  const a = Auth.load(), cur = a.pw[me.email];
+  if (!cur || (await hashPw(pf.old.value, cur.salt)).hash !== cur.hash) return msg("Current password is wrong.");
+  if (pf.new1.value.length < 8) return msg("New password must be at least 8 characters.");
+  if (pf.new1.value !== pf.new2.value) return msg("The new passwords don't match.");
+  a.pw[me.email] = await hashPw(pf.new1.value); Auth.save(a);
+  $("#pw-sheet").hidden = true; toast("Password changed");
+});
+
 /* ---- start ---- */
-loadPrograms(); renderList(); setupApp();
+{ const s = getSession(); if (s) signIn(s.email, s.role); else lock(); }

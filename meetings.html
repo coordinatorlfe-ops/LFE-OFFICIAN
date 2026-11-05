@@ -16,7 +16,7 @@
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="meetings.css">
 </head>
-<body>
+<body class="locked">
   <header class="top">
     <div class="wrap top-inner">
       <div class="brand">
@@ -32,7 +32,57 @@
         <button data-view="new" aria-selected="false">+ New meeting</button>
       </nav>
     </div>
+    <div class="wrap userbar" id="userbar">
+      <span id="who-am-i"></span>
+      <span class="spacer"></span>
+      <button class="linkbtn" id="users-btn" hidden>👥 Users</button>
+      <button class="linkbtn" id="mypw-btn">Change password</button>
+      <button class="linkbtn" id="logout-btn">Sign out</button>
+    </div>
   </header>
+
+  <!-- ============ SIGN IN ============ -->
+  <div id="login" class="login">
+    <form class="login-card" id="login-form" novalidate>
+      <div class="brand login-brand"><span class="mark">LFE</span>
+        <div><div class="brand-title">Meeting Records</div><div class="brand-sub">LFE Office · Staff sign in</div></div>
+      </div>
+      <h1>Sign in</h1>
+      <div class="choice-grid login-roles" id="login-role">
+        <label class="choice"><input type="radio" name="loginRole" value="LFE Coordinator" checked><span><b>Coordinator</b></span></label>
+        <label class="choice"><input type="radio" name="loginRole" value="LFE Program Officer"><span><b>LFE Program Officer</b></span></label>
+        <label class="choice"><input type="radio" name="loginRole" value="LFE Jr. Program Officer"><span><b>Jr. Program Officer</b></span></label>
+      </div>
+      <label class="field"><span>IUB email</span><input name="email" type="email" autocomplete="username" required></label>
+      <label class="field"><span id="pw-label">Password</span><input name="password" type="password" autocomplete="current-password" required></label>
+      <label class="field" id="pw2-wrap" hidden><span>Confirm new password</span><input name="password2" type="password" autocomplete="new-password"></label>
+      <div class="hint" id="login-msg"></div>
+      <button class="btn login-go" type="submit" id="login-go">Sign in</button>
+      <p class="hint small">First time on this device? Enter your email, then choose a password (at least 8 characters).</p>
+    </form>
+  </div>
+
+  <!-- ============ USERS (Coordinator only) ============ -->
+  <div id="users-sheet" class="sheet center" hidden>
+    <div class="sheet-card wide">
+      <h2>Users &amp; emails</h2>
+      <p class="hint">Only these emails can sign in on this device. The Coordinator email is fixed.</p>
+      <div id="users-body"></div>
+      <div class="wizard-nav"><span class="spacer"></span><button class="btn" id="users-close">Done</button></div>
+    </div>
+  </div>
+
+  <!-- ============ CHANGE PASSWORD ============ -->
+  <div id="pw-sheet" class="sheet center" hidden>
+    <form class="sheet-card" id="pw-form" novalidate>
+      <h2>Change password</h2>
+      <label class="field"><span>Current password</span><input name="old" type="password" autocomplete="current-password"></label>
+      <label class="field"><span>New password (at least 8 characters)</span><input name="new1" type="password" autocomplete="new-password"></label>
+      <label class="field"><span>Confirm new password</span><input name="new2" type="password" autocomplete="new-password"></label>
+      <div class="hint" id="pw-msg"></div>
+      <div class="wizard-nav"><button class="btn ghost" type="button" id="pw-cancel">Cancel</button><span class="spacer"></span><button class="btn" type="submit">Save password</button></div>
+    </form>
+  </div>
 
   <main class="wrap">
     <!-- ============ LIST ============ -->

@@ -24,6 +24,25 @@ Everything shown on the site comes from the `data/` folder. Edit these files on 
 > Note: this repository is public, so anyone can download `groups.csv`. Only include what students
 > need to see (avoid phone numbers, CGPA, etc.).
 
+## Staff sign in (Meeting Records)
+
+Meeting Records opens with a sign-in window. Choose your role, then enter your email and password.
+
+| Role | Email(s) allowed by default |
+|---|---|
+| LFE Coordinator | `coordinator.lfe@iub.edu.bd` (fixed, cannot be changed or removed) |
+| LFE Program Officer | `t.islam@iub.edu.bd` |
+| LFE Jr. Program Officer | `arif.tanz@iub.edu.bd` |
+
+- **First sign-in on a device:** enter the email, then choose a password (at least 8 characters).
+- **The Coordinator** can open **👥 Users** to add or remove emails for the Program Officer and Jr. Program Officer, and to reset their passwords. The person then sets a new password the next time they sign in.
+- Program Officers can only record meetings under their own role. The Coordinator can pick any role.
+- Each record notes who entered it and who last edited it. Both appear in the Excel export.
+- You are signed out after 30 minutes without activity (but not while an audio recording is running), or when the browser or app is closed.
+- **Sign-in accounts are kept on each device and browser**, the same way the records are. Set up the users on every device you use.
+  The Coordinator should choose a password on each device straight away. A forgotten Coordinator password can't be reset from inside the app.
+- This sign-in keeps people at a shared computer out of the records. It is not server-grade security, because the records are still stored unencrypted in the browser.
+
 ## Offline single-file version
 
 `LFE_Meeting_Records.html` is the whole Meeting Records app in one file. Download it and double-click
