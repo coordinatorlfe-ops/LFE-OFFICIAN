@@ -774,22 +774,23 @@ function prepLogin() {
     mode === "recover" ? "Enter the recovery code you were given when this device was set up."
     : first ? "First use on this device. The Coordinator sets the password that protects the records here, and receives a recovery code — keep it somewhere safe."
     : mode === "login" && role && !a.pw[email] ? (a.pw[COORD_EMAIL]
-        ? "No password on this device yet. The Coordinator must sign in, open 👥 Users and give you a temporary password."
+        ? "No password on this device yet. Ask the LFE Coordinator to set up your email and password (👥 Users)."
         : "This device has not been set up yet. The Coordinator must sign in first.")
     : "";
 }
 function setMode(m) { mode = m; lf.password.value = lf.password2.value = lf.rcode.value = ""; loginMsg(""); prepLogin(); }
 lf.email.addEventListener("input", prepLogin);
 $$('[name="loginRole"]', lf).forEach((el) => el.addEventListener("change", () => {
+  const cur = Auth.roleOf(lf.email.value);
   if (lf.loginRole.value === ROLES[0]) lf.email.value = COORD_EMAIL;
-  else if (normEmail(lf.email.value) === COORD_EMAIL) lf.email.value = "";
+  else if (cur && cur !== lf.loginRole.value) lf.email.value = ""; // that email belongs to another role
   if (!lf.email.value) { const list = Auth.load().users[lf.loginRole.value] || []; if (list.length === 1) lf.email.value = list[0]; }
   prepLogin(); (lf.email.value ? lf.password : lf.email).focus();
 }));
 $("#forgot").addEventListener("click", (e) => {
   e.preventDefault();
   if (Auth.roleOf(lf.email.value) !== ROLES[0])
-    return loginMsg("Ask the LFE Coordinator to give you a temporary password (👥 Users → Reset password).", false);
+    return loginMsg("Ask the LFE Coordinator to set a new password for you (👥 Users → Change password).", false);
   if (!Auth.load().recovery) return loginMsg("This device has no recovery code yet.");
   setMode("recover");
 });
@@ -836,6 +837,7 @@ lf.addEventListener("submit", async (e) => {
       const code = await Auth.newRecovery(a, dk);
       Auth.save(a);
       await finish(email, role, dk);
+      setupNext = true;
       return showRecovery(code);
     }
     const k = await deriveKeys(pw, a.pw[email].salt);
@@ -898,7 +900,11 @@ function showRecovery(code) {
   $("#rc-code").textContent = code;
   $("#rc-sheet").hidden = false;
 }
-$("#rc-ok").addEventListener("click", () => ($("#rc-sheet").hidden = true));
+let setupNext = false;
+$("#rc-ok").addEventListener("click", () => {
+  $("#rc-sheet").hidden = true;
+  if (setupNext) { setupNext = false; openUsers("Next, set up the other officers: check each email and set a password for them, then tell each person their password."); }
+});
 
 /* ---- who may conduct: officers record their own meetings; the Coordinator may choose any ---- */
 function lockConductor(value) {
@@ -908,61 +914,87 @@ function lockConductor(value) {
   });
 }
 
-/* ---- Users window (Coordinator only) ---- */
-const tempShown = {}; // temporary passwords just created, shown once
+/* ---- Users window (Coordinator only): the Coordinator sets up each officer's email and password ---- */
+const shown = {};      // passwords just set, shown once so the Coordinator can pass them on
+let resetting = null;  // email whose password is being changed
+const pwFields = (id) => `
+  <input type="text" class="upw" placeholder="Password — leave blank to generate one" autocomplete="off" aria-label="Password">
+  <label class="umust"><input type="checkbox" checked> They must change it at first sign-in</label>`;
 function renderUsers() {
   const a = Auth.load();
-  const status = (e) => tempShown[e] ? `Temporary password: <code class="temp">${esc(tempShown[e])}</code> — give this to them`
-    : !a.pw[e] ? "No password on this device" : a.pw[e].temp ? "Temporary password (must change at sign-in)" : "Password set";
+  const status = (e) => shown[e] ? `Password: <code class="temp">${esc(shown[e])}</code> — give this to them`
+    : !a.pw[e] ? "No password yet — set one below" : a.pw[e].temp ? "Must change password at next sign-in" : "Password set";
+  const row = (e) => `<div class="urow" data-email="${esc(e)}"><span class="em">${esc(e)}</span>
+      <small>${status(e)}</small>
+      <button class="btn ghost sm" data-reset>${a.pw[e] ? "Change password" : "Set password"}</button>
+      <button class="btn ghost danger sm" data-remove>Remove</button>
+      ${resetting === e || !a.pw[e] ? `<div class="uset">${pwFields()}<button class="btn sm" data-setpw>Save password</button></div>` : ""}</div>`;
   $("#users-body").innerHTML = `
     <div class="urole"><h3>LFE Coordinator <small>(${esc(OFFICERS[ROLES[0]])})</small></h3>
       <div class="urow"><span class="em">${esc(COORD_EMAIL)}</span><small>Fixed</small>
         <button class="btn ghost sm" data-recovery>New recovery code</button></div></div>` +
     ROLES.slice(1).map((r) => `<div class="urole" data-role="${esc(r)}">
       <h3>${esc(r)} <small>(${esc(OFFICERS[r])})</small></h3>
-      ${a.users[r].length ? a.users[r].map((e) => `<div class="urow"><span class="em">${esc(e)}</span>
-          <small>${status(e)}</small>
-          <button class="btn ghost sm" data-temp="${esc(e)}">${a.pw[e] ? "Reset password" : "Give temporary password"}</button>
-          <button class="btn ghost danger sm" data-remove="${esc(e)}">Remove</button></div>`).join("")
-        : `<p class="hint warn">No email — nobody can sign in as ${esc(r)}.</p>`}
-      <div class="uadd"><input type="email" placeholder="name@iub.edu.bd" aria-label="New email for ${esc(r)}">
-        <button class="btn sm" data-add>Add</button></div></div>`).join("");
+      ${a.users[r].length ? a.users[r].map(row).join("") : `<p class="hint warn">No email — nobody can sign in as ${esc(r)}.</p>`}
+      <div class="uadd">
+        <b>Add an email for ${esc(r)}</b>
+        <input type="email" class="uem" placeholder="name@iub.edu.bd" aria-label="New email for ${esc(r)}">
+        ${pwFields()}
+        <button class="btn sm" data-add>Add email &amp; password</button>
+      </div></div>`).join("");
 }
-function addUser(box) {
-  const input = $("input", box), email = normEmail(input.value), role = box.dataset.role;
+// read the password fields in a box: blank = generate one
+function pwFrom(box) {
+  const input = $(".upw", box), typed = input.value.trim();
+  if (typed && typed.length < 8) { input.classList.add("invalid"); toast("Password must be at least 8 characters"); return null; }
+  return { pw: typed || randCode(4) + "-" + randCode(4), temp: $(".umust input", box).checked };
+}
+async function addUser(roleBox) {
+  const box = $(".uadd", roleBox), input = $(".uem", box), email = normEmail(input.value), role = roleBox.dataset.role;
   if (!isEmail(email)) { input.classList.add("invalid"); return toast("Enter a valid email address"); }
   const a = Auth.load(), used = Auth.roleOf(email, a);
   if (used) { input.classList.add("invalid"); return toast(`Already used by ${used}`); }
-  a.users[role].push(email); Auth.save(a); renderUsers(); toast(`Added ${email}`);
+  const p = pwFrom(box); if (!p) return;
+  a.users[role].push(email);
+  await Auth.setPassword(a, email, p.pw, DK, p.temp); Auth.save(a);
+  shown[email] = p.pw; renderUsers(); toast(`Added ${email}`);
 }
 $("#users-body").addEventListener("click", async (e) => {
   if (!isCoord() || !DK) return;
   const b = e.target.closest("button"); if (!b) return;
-  const box = b.closest(".urole"), role = box?.dataset.role, a = Auth.load();
-  if (b.dataset.add !== undefined) return addUser(box);
+  const roleBox = b.closest(".urole"), role = roleBox?.dataset.role, em = b.closest(".urow")?.dataset.email, a = Auth.load();
+  if (b.dataset.add !== undefined) return addUser(roleBox);
   if (b.dataset.recovery !== undefined) {
     if (!confirm("Create a new recovery code? The old code will stop working.")) return;
     const code = await Auth.newRecovery(a, DK); Auth.save(a); return showRecovery(code);
   }
-  if (b.dataset.remove) {
-    const em = b.dataset.remove;
+  if (b.dataset.remove !== undefined) {
     if (!confirm(`Remove ${em}? They will no longer be able to sign in on this device.`)) return;
-    a.users[role] = a.users[role].filter((x) => x !== em); delete a.pw[em]; delete tempShown[em];
+    a.users[role] = a.users[role].filter((x) => x !== em); delete a.pw[em]; delete shown[em];
     Auth.save(a); renderUsers();
-  } else if (b.dataset.temp) {
-    const em = b.dataset.temp;
-    if (a.pw[em] && !confirm(`Reset the password for ${em}? Their current password stops working.`)) return;
-    const tmp = randCode(4) + "-" + randCode(4);
-    await Auth.setPassword(a, em, tmp, DK, true); Auth.save(a);
-    tempShown[em] = tmp; renderUsers();
+  } else if (b.dataset.reset !== undefined) {
+    resetting = resetting === em ? null : em; renderUsers();
+    $(`.urow[data-email="${CSS.escape(em)}"] .upw`)?.focus();
+  } else if (b.dataset.setpw !== undefined) {
+    const p = pwFrom(b.closest(".uset")); if (!p) return;
+    await Auth.setPassword(a, em, p.pw, DK, p.temp); Auth.save(a);
+    shown[em] = p.pw; resetting = null; renderUsers(); toast("Password saved");
   }
 });
 $("#users-body").addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && e.target.matches(".uadd input")) { e.preventDefault(); if (isCoord()) addUser(e.target.closest(".urole")); }
+  if (e.key !== "Enter" || !isCoord()) return;
+  const box = e.target.closest(".uadd, .uset"); if (!box) return;
+  e.preventDefault(); $("button", box).click();
 });
 $("#users-body").addEventListener("input", (e) => e.target.classList.remove("invalid"));
-$("#users-btn").addEventListener("click", () => { if (!isCoord()) return; renderUsers(); $("#users-sheet").hidden = false; });
-$("#users-close").addEventListener("click", () => { for (const k in tempShown) delete tempShown[k]; $("#users-sheet").hidden = true; });
+function openUsers(intro) {
+  if (!isCoord()) return;
+  resetting = null; renderUsers();
+  $("#users-intro").textContent = intro || "Only these emails can sign in on this device. The Coordinator email is fixed.";
+  $("#users-sheet").hidden = false;
+}
+$("#users-btn").addEventListener("click", () => openUsers());
+$("#users-close").addEventListener("click", () => { for (const k in shown) delete shown[k]; resetting = null; $("#users-sheet").hidden = true; });
 
 /* ---- change own password ---- */
 const pf = $("#pw-form");

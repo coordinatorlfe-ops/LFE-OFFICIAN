@@ -227,3 +227,12 @@ code.temp { font: 700 .95rem ui-monospace, Menlo, Consolas, monospace; backgroun
   .print-sign { display: flex; justify-content: space-between; margin-top: 60px; }
   .print-sign div { border-top: 1px solid #888; width: 200px; padding-top: 6px; font-size: .9rem; color: #444; }
 }
+
+/* users window: set up email + password */
+.uadd { flex-direction: column; align-items: stretch; background: #faf9f6; border-radius: 8px; padding: 10px; }
+.uadd b { font-size: .85rem; color: var(--muted); font-weight: 600; }
+.uadd input, .uset input.upw { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; }
+.uset { flex: 1 1 100%; display: flex; flex-direction: column; gap: 6px; background: #faf9f6; padding: 8px; border-radius: 8px; }
+.umust { display: flex; align-items: center; gap: 6px; font-size: .85rem; color: var(--muted); cursor: pointer; }
+.umust input { width: 16px; height: 16px; accent-color: var(--accent); }
+.uadd .btn, .uset .btn { align-self: flex-start; }

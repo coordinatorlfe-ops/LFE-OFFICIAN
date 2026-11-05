@@ -38,12 +38,14 @@ Meeting Records opens with a sign-in window. Choose your role, then enter your e
 1. Sign in as Coordinator and choose the password. This password protects the records on that device.
 2. You are shown a **recovery code** only once. Write it down and keep it safe and private.
    If the Coordinator password is ever forgotten, the code is the only way back in. Use **Forgot password?** and enter the code.
-3. Open **👥 Users**. Click **Give temporary password** for each officer and tell them the code it shows.
-   At their first sign-in they replace it with their own password.
+3. The **👥 Users** window then opens. **The Coordinator sets up each officer's email and password:**
+   - Check the email shown for each role, or add a new one. Type a password, or leave it blank to generate one.
+   - Tick **They must change it at first sign-in** if the officer should replace it with their own. This is ticked by default.
+   - Tell each officer their password. It is shown only until the Users window is closed.
 
 **Coordinator only: 👥 Users**
-- Add or remove emails for the Program Officer and Jr. Program Officer.
-- Reset a password, which gives the person a new temporary password.
+- Add an email with its password, or remove an email, for the Program Officer and Jr. Program Officer.
+- **Change password** sets a new password for an officer, for example when they forget theirs.
 - Make a new recovery code. The old code then stops working.
 
 **Other rules**
