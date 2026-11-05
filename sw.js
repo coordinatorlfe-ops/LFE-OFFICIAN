@@ -1,6 +1,6 @@
 // LFE Meeting Records — offline support.
 // Bump VERSION whenever app files change so installed apps pick up the update.
-const VERSION = "lfe-meetings-v3";
+const VERSION = "lfe-meetings-v4";
 const FILES = [
   "./meetings.html", "./style.css", "./meetings.css", "./meetings.js",
   "./vendor/jspdf.umd.min.js", "./vendor/xlsx.full.min.js",

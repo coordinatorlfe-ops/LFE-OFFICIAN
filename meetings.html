@@ -96,6 +96,8 @@
         </div>
         <div class="actions">
           <button class="btn ghost" id="install-btn" hidden>⬇ Install app</button>
+          <button class="btn ghost" id="drive-btn" hidden>☁ Google Drive</button>
+          <button class="btn ghost" id="drive-restore-btn" hidden>☁ Restore from Drive</button>
           <button class="btn ghost" id="backup-btn">⬇ Backup</button>
           <button class="btn ghost" id="restore-btn" hidden>⬆ Restore</button>
           <input type="file" id="restore-file" accept=".json,application/json" hidden>
@@ -384,6 +386,16 @@
       <div class="hint" id="bk-msg"></div>
       <div class="wizard-nav"><button class="btn ghost" type="button" id="bk-cancel">Cancel</button><span class="spacer"></span><button class="btn" type="submit" id="bk-go">Create backup</button></div>
     </form>
+  </div>
+
+  <!-- ============ RESTORE FROM GOOGLE DRIVE ============ -->
+  <div id="drive-sheet" class="sheet center" hidden>
+    <div class="sheet-card wide">
+      <h2>Restore from Google Drive</h2>
+      <p class="hint">Backups in the “LFE Meeting Backups” folder of your Google Drive, newest first. Choose one.</p>
+      <div id="drive-list"></div>
+      <div class="wizard-nav"><span class="spacer"></span><button class="btn ghost" id="drive-close">Cancel</button></div>
+    </div>
   </div>
 
   <div id="print-area"></div>

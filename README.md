@@ -18,6 +18,7 @@ Everything shown on the site comes from the `data/` folder. Edit these files on 
 | `data/groups.csv` | Student list for the group finder (export from Excel as CSV, same column names) |
 | `data/iub-programs.json` | IUB schools and majors used in the Meeting Records dropdowns |
 | `data/groups-info.json` | Semester name and the note under the finder |
+| `data/google-drive.json` | Google client ID that turns on Google Drive backup (see below) |
 
 `groups.csv` columns: `student_id, name, section, group, venue, field_start, field_end, faculty`
 
@@ -67,6 +68,37 @@ Records saved by the earlier unencrypted version are encrypted automatically the
   Staff emails from the backup are added too. Give them temporary passwords on the new device.
 - To **move or combine records between devices**, make a backup on one device and restore it on the other.
 - Excel export is for reading and reporting. Use **Backup** to keep the records safe.
+
+## Google Drive backup
+
+- **☁ Google Drive** (any signed-in staff member) saves an encrypted backup in an **“LFE Meeting Backups”** folder in that person's Google Drive.
+  Google asks you to sign in the first time in each session. Pick your IUB account.
+- **☁ Restore from Drive** (Coordinator only) lists the backups in that folder, newest first. Choose one and enter its backup password.
+- The backup is encrypted **before** it is uploaded. Google, or anyone who opens the Drive folder, sees only scrambled data.
+- The app asks for the narrowest Drive permission (`drive.file`). It can only see files it created itself, nothing else in your Drive.
+- Each person's backups go to **their own** Drive. To bring an officer's records to the Coordinator, the officer can share their backup file with the Coordinator, who downloads it and uses **⬆ Restore**.
+- Drive works on the website and the installed app. It does not work in the offline single file.
+
+### One-time setup (Coordinator, about 10 minutes)
+
+Google needs to know the app before it lets the app save to Drive. Do this once, signed in as `coordinator.lfe@iub.edu.bd`:
+
+1. Go to <https://console.cloud.google.com/> and create a project named **LFE Meeting Records**.
+2. **APIs & Services → Library**: search for **Google Drive API** and click **Enable**.
+3. **Google Auth Platform** (or **OAuth consent screen**) → **Get started**:
+   - App name: *LFE Meeting Records*. Support email: your email.
+   - Audience: choose **Internal** if it is offered. This means only IUB accounts and needs no Google review.
+     If only **External** is offered, choose it, then publish the app or add the three staff emails as test users.
+4. **Data access → Add or remove scopes**: add `.../auth/drive.file` and save.
+5. **Clients → Create client**:
+   - Application type: **Web application**. Name: *LFE website*.
+   - **Authorized JavaScript origins**: add `https://coordinatorlfe-ops.github.io`
+   - Click **Create** and copy the **Client ID** (it ends in `.apps.googleusercontent.com`).
+6. On GitHub, open `data/google-drive.json`, click the pencil, and paste the Client ID between the quotes:
+   `{ "client_id": "1234567890-abc...apps.googleusercontent.com" }`. Then click **Commit changes**.
+
+Within a couple of minutes, the ☁ Google Drive buttons work for everyone. If IUB's Google Workspace blocks the app,
+ask IUB IT to allow the OAuth client ID from step 5.
 
 ## Other features
 

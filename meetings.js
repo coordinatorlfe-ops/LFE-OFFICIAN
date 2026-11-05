@@ -433,8 +433,8 @@ async function renderList() {
   const lastBk = localStorage.getItem("lfe-last-backup");
   const bkDays = lastBk ? Math.floor((Date.now() - new Date(lastBk)) / 864e5) : null;
   $("#backup-note").hidden = !all.length || (bkDays !== null && bkDays < 7);
-  $("#backup-note").textContent = bkDays === null ? "No backup made on this device yet — click ⬇ Backup so records are not lost if this device fails."
-    : `Last backup was ${bkDays} days ago. Click ⬇ Backup to make a new one.`;
+  $("#backup-note").textContent = bkDays === null ? "No backup made on this device yet — click ☁ Google Drive or ⬇ Backup so records are not lost if this device fails."
+    : `Last backup was ${bkDays} days ago. Click ☁ Google Drive or ⬇ Backup to make a new one.`;
   $("#stats").innerHTML = `
     <div class="stat"><b>${all.length}</b>meetings</div>
     ${CATS.map((c) => `<div class="stat"><b>${all.filter((r) => r.category === c).length}</b>${c} · ${CAT_NAME[c]}</div>`).join("")}
@@ -861,6 +861,7 @@ async function finish(email, role, dk) {
   $("#who-am-i").innerHTML = `Signed in: <b>${esc(OFFICERS[role])}</b> · ${esc(role)} · ${esc(email)}`;
   $("#users-btn").hidden = $("#restore-btn").hidden = !isCoord();
   if (!started) { started = true; loadPrograms(); setupApp(); }
+  Drive.init();
   if (!$("#view-record").hidden && current) openRecord(current.id); else await renderList();
   if (moved) toast(`${moved} earlier record(s) are now encrypted`);
 }
@@ -1015,78 +1016,228 @@ pf.addEventListener("submit", async (e) => {
 /* ================= backup & restore ================= */
 // A backup is one encrypted file with every record, its audio, and the list of staff emails.
 // It is locked with a backup password chosen when it is made. Restoring merges: newer versions win.
+async function buildBackup(pw) {
+  const recs = await DB.all();
+  for (const r of recs) if (r.hasAudio) {
+    const b = await DB.audio(r.id);
+    if (b) r.audio = { type: b.type, data: toB64(await b.arrayBuffer()) };
+  }
+  const payload = { users: Auth.load().users, records: recs };
+  const k = await deriveKeys(pw), box = await seal(k.key, te.encode(JSON.stringify(payload)));
+  return JSON.stringify({ format: "lfe-meetings-backup", version: 1, created: new Date().toISOString(), by: me.email,
+    count: recs.length, salt: k.salt, iv: box.iv, data: toB64(box.ct) });
+}
+async function restoreBackup(text, pw) { // returns a message, or throws Error with a user-facing message
+  let file;
+  try { file = JSON.parse(text); } catch { throw new Error("This is not an LFE backup file."); }
+  if (file.format !== "lfe-meetings-backup") throw new Error("This is not an LFE backup file.");
+  let payload;
+  try {
+    const k = await deriveKeys(pw, file.salt);
+    payload = JSON.parse(td.decode(await unseal(k.key, { iv: file.iv, ct: fromB64(file.data) })));
+  } catch { throw new Error("Wrong backup password, or the file is damaged."); }
+  const have = new Map((await DB.all()).map((r) => [r.id, r]));
+  const stamp = (r) => r.editedAt || r.createdAt || "";
+  let added = 0, updated = 0, same = 0;
+  for (const r of payload.records) {
+    const old = have.get(r.id);
+    if (old && stamp(old) >= stamp(r)) { same++; continue; }
+    const a = r.audio ? new Blob([fromB64(r.audio.data)], { type: r.audio.type }) : null;
+    delete r.audio;
+    await DB.put(r, a);
+    old ? updated++ : added++;
+  }
+  // bring over staff emails that this device doesn't have yet
+  const a = Auth.load(); let newUsers = 0;
+  for (const role of ROLES.slice(1)) for (const em of payload.users?.[role] || [])
+    if (!Auth.roleOf(em, a)) { a.users[role].push(em); newUsers++; }
+  Auth.save(a);
+  return `Restore complete.\n\n${added} new meeting(s) added\n${updated} updated with a newer version\n${same} already up to date` +
+    (newUsers ? `\n${newUsers} staff email(s) added — set their passwords in 👥 Users.` : "");
+}
+const backupName = () => `LFE_Meetings_Backup_${todayISO()}_${new Date().toTimeString().slice(0, 5).replace(":", "")}.json`;
+const markBackedUp = () => { localStorage.setItem("lfe-last-backup", new Date().toISOString()); renderList(); };
+
+/* ---- the password window, shared by every backup / restore path ---- */
 const bf = $("#bk-form");
-let bkMode = "save", bkFile = null;
-function openBackup(m, file) {
-  bkMode = m; bkFile = file || null; bf.reset(); $("#bk-msg").textContent = "";
-  $("#bk-title").textContent = m === "save" ? "Back up all meetings" : `Restore from ${file.name}`;
-  $("#bk-intro").textContent = m === "save"
-    ? "Choose a password for this backup file. You need it to restore the file — on this or another device. Keep the file somewhere safe (e.g. IUB OneDrive / Google Drive)."
-    : "Enter the password that was chosen when this backup was made. Records are merged with the ones on this device; where both have the same meeting, the most recently edited version is kept.";
-  $("#bk2-wrap").hidden = m !== "save";
-  $("#bk-go").textContent = m === "save" ? "Create backup" : "Restore";
+let bkMode = "save", bkText = null, bkLabel = "";
+function openBackup(m, text, label) {
+  bkMode = m; bkText = text || null; bkLabel = label || ""; bf.reset(); $("#bk-msg").textContent = "";
+  $("#bk-title").textContent = m === "save" ? "Back up to this device" : m === "drive" ? "Back up to Google Drive" : `Restore ${bkLabel}`;
+  $("#bk-intro").textContent = m === "restore"
+    ? "Enter the password that was chosen when this backup was made. Records are merged with the ones on this device; where both have the same meeting, the most recently edited version is kept."
+    : (m === "drive" ? "The backup is encrypted before it leaves this device and saved in the “LFE Meeting Backups” folder of your Google Drive. "
+                     : "Keep the file somewhere safe. ") + "Choose a password for this backup — you need it to restore it, on this or another device.";
+  $("#bk2-wrap").hidden = m === "restore";
+  $("#bk-go").textContent = m === "save" ? "Create backup" : m === "drive" ? "Back up to Drive" : "Restore";
   $("#bk-sheet").hidden = false; bf.bpw.focus();
 }
 $("#backup-btn").addEventListener("click", () => openBackup("save"));
 $("#restore-btn").addEventListener("click", () => $("#restore-file").click());
-$("#restore-file").addEventListener("change", (e) => { const f = e.target.files[0]; e.target.value = ""; if (f && isCoord()) openBackup("restore", f); });
+$("#restore-file").addEventListener("change", async (e) => {
+  const f = e.target.files[0]; e.target.value = "";
+  if (f && isCoord()) openBackup("restore", await f.text(), `from ${f.name}`);
+});
 $("#bk-cancel").addEventListener("click", () => ($("#bk-sheet").hidden = true));
 bf.addEventListener("submit", async (e) => {
   e.preventDefault();
   const msg = (t, err = true) => { $("#bk-msg").textContent = t; $("#bk-msg").className = "hint" + (err ? " err" : ""); };
   const pw = bf.bpw.value;
+  if (bkMode !== "restore") {
+    if (pw.length < 8) return msg("Choose a backup password of at least 8 characters.");
+    if (pw !== bf.bpw2.value) return msg("The two passwords don't match.");
+  }
+  // Ask Google for access straight away, while the click still counts (otherwise the sign-in pop-up is blocked).
+  const tokenP = bkMode === "drive" ? Drive.token() : null;
+  tokenP?.catch(() => {});
   $("#bk-go").disabled = true;
   try {
-    if (bkMode === "save") {
-      if (pw.length < 8) return msg("Choose a backup password of at least 8 characters.");
-      if (pw !== bf.bpw2.value) return msg("The two passwords don't match.");
-      msg("Preparing backup…", false);
-      const recs = await DB.all();
-      for (const r of recs) if (r.hasAudio) {
-        const b = await DB.audio(r.id);
-        if (b) r.audio = { type: b.type, data: toB64(await b.arrayBuffer()) };
-      }
-      const payload = { users: Auth.load().users, records: recs };
-      const k = await deriveKeys(pw), box = await seal(k.key, te.encode(JSON.stringify(payload)));
-      const file = { format: "lfe-meetings-backup", version: 1, created: new Date().toISOString(), by: me.email,
-        count: recs.length, salt: k.salt, iv: box.iv, data: toB64(box.ct) };
-      $("#bk-sheet").hidden = true;
-      await saveBlob(new Blob([JSON.stringify(file)], { type: "application/json" }), `LFE_Meetings_Backup_${todayISO()}.json`);
-      localStorage.setItem("lfe-last-backup", new Date().toISOString()); renderList();
-    } else {
+    if (bkMode === "restore") {
       if (!isCoord()) return;
-      let file;
-      try { file = JSON.parse(await bkFile.text()); } catch { return msg("This is not an LFE backup file."); }
-      if (file.format !== "lfe-meetings-backup") return msg("This is not an LFE backup file.");
       msg("Opening backup…", false);
-      let payload;
-      try {
-        const k = await deriveKeys(pw, file.salt);
-        payload = JSON.parse(td.decode(await unseal(k.key, { iv: file.iv, ct: fromB64(file.data) })));
-      } catch { return msg("Wrong backup password, or the file is damaged."); }
-      const have = new Map((await DB.all()).map((r) => [r.id, r]));
-      const stamp = (r) => r.editedAt || r.createdAt || "";
-      let added = 0, updated = 0, same = 0;
-      for (const r of payload.records) {
-        const old = have.get(r.id);
-        if (old && stamp(old) >= stamp(r)) { same++; continue; }
-        const a = r.audio ? new Blob([fromB64(r.audio.data)], { type: r.audio.type }) : null;
-        delete r.audio;
-        await DB.put(r, a);
-        old ? updated++ : added++;
-      }
-      // bring over staff emails that this device doesn't have yet
-      const a = Auth.load(); let newUsers = 0;
-      for (const role of ROLES.slice(1)) for (const em of payload.users?.[role] || [])
-        if (!Auth.roleOf(em, a)) { a.users[role].push(em); newUsers++; }
-      Auth.save(a);
-      $("#bk-sheet").hidden = true; await renderList();
-      alert(`Restore complete.\n\n${added} new meeting(s) added\n${updated} updated with a newer version\n${same} already up to date` +
-        (newUsers ? `\n${newUsers} staff email(s) added — give them a temporary password in 👥 Users.` : ""));
+      const result = await restoreBackup(bkText, pw);
+      $("#bk-sheet").hidden = true; await renderList(); alert(result);
+      return;
     }
-  } catch (err) { msg("Something went wrong: " + err.message); }
+    msg(bkMode === "drive" ? "Waiting for Google sign-in…" : "Preparing backup…", false);
+    if (tokenP) await tokenP;
+    msg("Preparing backup…", false);
+    const text = await buildBackup(pw), name = backupName();
+    if (bkMode === "drive") {
+      msg("Uploading to Google Drive…", false);
+      await Drive.upload(name, text);
+      $("#bk-sheet").hidden = true; toast("Backed up to Google Drive"); markBackedUp();
+    } else {
+      $("#bk-sheet").hidden = true;
+      await saveBlob(new Blob([text], { type: "application/json" }), name);
+      markBackedUp();
+    }
+  } catch (err) { msg(err.message || String(err)); }
   finally { $("#bk-go").disabled = false; }
 });
+
+/* ================= Google Drive ================= */
+// Set up once in data/google-drive.json (see README). The app asks only for the "drive.file" permission:
+// it can see and change only the files it creates itself, nothing else in the person's Drive.
+const Drive = {
+  cfg: {}, client: null, tok: null, exp: 0, pending: null, folderName: "LFE Meeting Backups",
+  ready() { return !!(this.cfg.client_id && this.client); },
+  canWork() { return location.protocol === "https:" || location.hostname === "localhost"; },
+  async init() {
+    try { this.cfg = await (await fetch("data/google-drive.json", { cache: "no-store" })).json(); } catch { this.cfg = {}; }
+    const show = this.canWork();
+    $("#drive-btn").hidden = !show;
+    $("#drive-restore-btn").hidden = !show || !isCoord();
+    if (!show || !this.cfg.client_id) return;
+    await new Promise((res, rej) => {
+      if (window.google?.accounts?.oauth2) return res();
+      const sc = Object.assign(document.createElement("script"), { src: "https://accounts.google.com/gsi/client", async: true, onload: res, onerror: rej });
+      document.head.appendChild(sc);
+    }).catch(() => {});
+    if (!window.google?.accounts?.oauth2) return;
+    this.client = google.accounts.oauth2.initTokenClient({
+      client_id: this.cfg.client_id,
+      scope: "https://www.googleapis.com/auth/drive.file",
+      callback: (r) => {
+        const p = this.pending; this.pending = null; if (!p) return;
+        if (r.error) return p.rej(new Error("Google sign-in failed: " + (r.error_description || r.error)));
+        this.tok = r.access_token; this.exp = Date.now() + (Number(r.expires_in) || 3600) * 1000; p.res(this.tok);
+      },
+      error_callback: (e) => {
+        const p = this.pending; this.pending = null;
+        p?.rej(new Error(e?.type === "popup_closed" ? "Google sign-in was closed before finishing." : "Google sign-in could not open — allow pop-ups for this site and try again."));
+      },
+    });
+  },
+  notReady() {
+    return new Error(!this.canWork() ? "Google Drive works on the website and installed app, not in the offline file."
+      : !this.cfg.client_id ? "Google Drive is not connected yet. The Coordinator needs to add the Google client ID to data/google-drive.json (see README)."
+      : "Google sign-in could not load. Check the internet connection and try again.");
+  },
+  // must be called directly from a click
+  token() {
+    if (!this.ready()) return Promise.reject(this.notReady());
+    if (this.tok && Date.now() < this.exp - 60000) return Promise.resolve(this.tok);
+    return new Promise((res, rej) => {
+      this.pending?.rej(new Error("cancelled"));
+      this.pending = { res, rej };
+      this.client.requestAccessToken({ hint: me?.email || "" });
+    });
+  },
+  async api(url, opts = {}) {
+    const t = await this.token();
+    const r = await fetch(url, { ...opts, headers: { Authorization: `Bearer ${t}`, ...(opts.headers || {}) } });
+    if (r.status === 401) { this.tok = null; throw new Error("Google sign-in expired — please try again."); }
+    if (!r.ok) throw new Error(`Google Drive error ${r.status}: ${(await r.text()).slice(0, 200)}`);
+    return r;
+  },
+  async folder() {
+    const q = encodeURIComponent(`name='${this.folderName}' and mimeType='application/vnd.google-apps.folder' and trashed=false`);
+    const found = await (await this.api(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id)&spaces=drive`)).json();
+    if (found.files?.length) return found.files[0].id;
+    const made = await (await this.api("https://www.googleapis.com/drive/v3/files?fields=id", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: this.folderName, mimeType: "application/vnd.google-apps.folder" }),
+    })).json();
+    return made.id;
+  },
+  async upload(name, text) {
+    const meta = { name, parents: [await this.folder()], mimeType: "application/json", description: "LFE Meeting Records — encrypted backup" };
+    if (text.length < 4.5e6) { // small: one request
+      const bd = "lfe" + randCode(16);
+      const body = new Blob([`--${bd}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n--${bd}\r\nContent-Type: application/json\r\n\r\n`, text, `\r\n--${bd}--`]);
+      return (await this.api("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id", {
+        method: "POST", headers: { "Content-Type": `multipart/related; boundary=${bd}` }, body,
+      })).json();
+    }
+    // large (lots of audio): resumable upload
+    const init = await this.api("https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id", {
+      method: "POST", headers: { "Content-Type": "application/json; charset=UTF-8", "X-Upload-Content-Type": "application/json" },
+      body: JSON.stringify(meta),
+    });
+    const loc = init.headers.get("Location");
+    if (!loc) throw new Error("Google Drive did not accept the upload. Try again, or use ⬇ Backup to this device.");
+    const put = await fetch(loc, { method: "PUT", headers: { "Content-Type": "application/json" }, body: text });
+    if (!put.ok) throw new Error(`Upload failed (${put.status}). Try again.`);
+    return put.json();
+  },
+  async list() {
+    const q = encodeURIComponent(`'${await this.folder()}' in parents and trashed=false`);
+    return (await (await this.api(`https://www.googleapis.com/drive/v3/files?q=${q}&orderBy=createdTime desc&pageSize=50&fields=files(id,name,createdTime,size)`)).json()).files || [];
+  },
+  async download(id) { return (await this.api(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?alt=media`)).text(); },
+};
+
+$("#drive-btn").addEventListener("click", () => {
+  if (!Drive.ready()) return alert(Drive.notReady().message);
+  openBackup("drive");
+});
+$("#drive-restore-btn").addEventListener("click", async () => {
+  if (!isCoord()) return;
+  if (!Drive.ready()) return alert(Drive.notReady().message);
+  const tokenP = Drive.token(); // straight from the click
+  const box = $("#drive-list");
+  box.innerHTML = `<p class="hint">Waiting for Google sign-in…</p>`; $("#drive-sheet").hidden = false;
+  try {
+    await tokenP;
+    box.innerHTML = `<p class="hint">Loading backups…</p>`;
+    const files = await Drive.list();
+    box.innerHTML = files.length
+      ? files.map((f) => `<button class="drive-file" data-id="${esc(f.id)}" data-name="${esc(f.name)}">
+          <b>${esc(f.name)}</b><small>${esc(new Date(f.createdTime).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" }))} · ${(Number(f.size || 0) / 1024 / 1024).toFixed(1)} MB</small></button>`).join("")
+      : `<p class="hint warn">No backups in the “${Drive.folderName}” folder of this Google account yet.</p>`;
+  } catch (err) { box.innerHTML = `<p class="hint err">${esc(err.message)}</p>`; }
+});
+$("#drive-list").addEventListener("click", async (e) => {
+  const b = e.target.closest(".drive-file"); if (!b || !isCoord()) return;
+  b.disabled = true; b.querySelector("small").textContent = "Downloading…";
+  try {
+    const text = await Drive.download(b.dataset.id);
+    $("#drive-sheet").hidden = true;
+    openBackup("restore", text, `from Google Drive: ${b.dataset.name}`);
+  } catch (err) { b.disabled = false; b.querySelector("small").textContent = err.message; }
+});
+$("#drive-close").addEventListener("click", () => ($("#drive-sheet").hidden = true));
 
 /* ---- start ---- */
 lock();
